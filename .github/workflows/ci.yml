@@ -1,0 +1,25 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.15.2
+      - run: zig build test
+      - run: zig build -Doptimize=ReleaseFast
+      - name: Smoke test
+        run: |
+          echo '{"tool_name":"Bash","tool_input":{"command":"git status"}}' | ./zig-out/bin/ccguard
+          echo '{"tool_name":"Bash","tool_input":{"command":"rm -rf /"}}' | ./zig-out/bin/ccguard && exit 1 || true

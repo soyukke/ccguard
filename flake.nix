@@ -27,6 +27,7 @@
           buildInputs = [
             pkgs.zig
             pkgs.zls
+            pkgs.vhs
           ];
         };
       }
