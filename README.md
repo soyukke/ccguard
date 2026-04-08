@@ -2,7 +2,7 @@
 
 Ultra-lightweight [Claude Code](https://docs.anthropic.com/en/docs/claude-code) hook guard written in Zig.
 
-**280KB binary, ~0ms latency** — runs on every tool call without you noticing.
+**300KB binary, ~0ms latency** — runs on every tool call without you noticing.
 
 ccguard acts as a `PreToolUse` hook that inspects every tool call (Bash, Read, Edit, Write) and blocks dangerous operations before they execute.
 
