@@ -11,7 +11,7 @@ ccguard is a Claude Code PreToolUse hook guard written in Zig. It reads tool cal
 ```bash
 zig build                          # Debug build
 zig build -Doptimize=ReleaseFast   # Release build
-zig build test                     # Run all tests (247 tests in src/main.zig)
+zig build test                     # Run all tests (298 tests in src/main.zig)
 ```
 
 With just (optional):
@@ -90,7 +90,7 @@ All logic lives in `src/main.zig`. The flow is:
 - `isPipLocalInstall()` checks ALL `pip install` occurrences; if any lacks `-r`/`-e`, it denies
 - Shell config files (`.zshrc`, `.gitconfig`, `.claude/settings`, `.cursor/mcp.json`) are blocked for Edit/Write but allowed for Read
 - System paths (`/etc/`, `/usr/`, `/System/`, `/private/etc/`, `/private/var/`) are blocked for Edit/Write but allowed for Read
-- Tests inline in `src/main.zig` cover both attack patterns and false-positive prevention (247 tests)
+- Tests inline in `src/main.zig` cover both attack patterns and false-positive prevention (298 tests)
 
 ## Development Workflow
 
