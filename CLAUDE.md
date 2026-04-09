@@ -11,7 +11,7 @@ ccguard is a Claude Code PreToolUse hook guard written in Zig. It reads tool cal
 ```bash
 zig build                          # Debug build
 zig build -Doptimize=ReleaseFast   # Release build
-zig build test                     # Run all tests (217 tests in src/main.zig)
+zig build test                     # Run all tests (247 tests in src/main.zig)
 ```
 
 With just (optional):
@@ -29,38 +29,68 @@ All logic lives in `src/main.zig`. The flow is:
 
 1. **main()** reads up to 64KB JSON from stdin, parses into `HookInput`
 2. **evaluate()** dispatches by `tool_name`:
-   - `Bash` → `checkBashCommand()` against dangerous/reverse-shell/network/install/prefix/macOS patterns
+   - `Bash` → `checkBashCommand()` with normalization pipeline + pattern matching
    - `Read` → `checkFileAccess()` against secret file patterns only
-   - `Edit`/`Write` → `checkFileAccess()` against secret files AND shell config patterns
+   - `Edit`/`Write` → `checkFileAccess()` against secret files, shell config, and system paths
    - Unknown tools → allow
 3. **writeOutput()** emits PreToolUse hook JSON response with allow/deny decision
+
+### checkBashCommand Normalization Pipeline
+
+1. Block ANSI-C quoting (`\x`, `\0`) on raw input
+2. `stripCommitMessage()` — remove `-m "..."` content to prevent FPs from commit messages
+3. `normalizeShellEvasion()` — tab→space, `${IFS}`/`$IFS`→space, quote stripping, brace expansion, backslash-newline removal, space collapse
+4. `containsPatternSafe()` for dangerous_commands, reverse_shell, pipe_shell (skips safe-arg segments)
+5. `containsPattern()` for network+secret exfiltration (intentionally not safe-arg aware)
+6. `hasPipeToShell()` — dynamic pipe-to-shell detection with basename matching
+7. Other checks: global_install, history_evasion, file_attr, prefix_only, env_dump, dns_exfil, container_escape, docker, proc_secret
+
+### checkFileAccess Flow
+
+1. `normalizePath()` — collapse `//`, `/./`, `/../`
+2. `matchesSecretPattern()` — basename-aware secret file detection
+3. `matchesProcSecret()` — `/proc/*/environ`, `/proc/*/cmdline`
+4. Edit/Write only: `shell_config_patterns`, `system_path_patterns`
 
 ### Rule Categories (pattern arrays at module level)
 
 | Array | Check Type | Applies To |
 |---|---|---|
-| `dangerous_commands` | substring | Bash |
-| `reverse_shell_patterns` | substring | Bash |
-| `pipe_shell_patterns` | substring | Bash |
-| `network_commands` + `secret_keywords` | substring AND | Bash (exfiltration) |
+| `dangerous_commands` | segment-aware (`containsPatternSafe`) | Bash |
+| `reverse_shell_patterns` | segment-aware (`containsPatternSafe`) | Bash |
+| `pipe_shell_patterns` | segment-aware (`containsPatternSafe`) | Bash |
+| `shell_obfuscation_patterns` | substring (raw input) | Bash |
+| `network_commands` + `secret_keywords` | substring AND (intentionally not safe-arg aware) | Bash (exfiltration) |
 | `global_install_commands` | substring | Bash |
 | `history_evasion_commands` | substring | Bash |
 | `file_attr_commands` | substring | Bash |
+| `dns_exfil_commands` + `cmd_subst_indicators` | word-boundary + substring AND | Bash (DNS exfiltration) |
+| `container_escape_patterns` | substring | Bash |
+| `docker_dangerous_patterns` | substring | Bash |
 | `prefix_only_commands` | exact/prefix per segment | Bash (chain-aware) |
+| `safe_arg_commands` | prefix match per segment | Bash (FP prevention) |
+| `proc_secret_files` | path-token aware | Read/Edit/Write + Bash |
 | `secret_exact_names/dir/file/extensions` | basename-aware | Read/Edit/Write |
 | `shell_config_patterns` | substring | Edit/Write only |
 | `system_path_patterns` | startsWith | Edit/Write only |
 
 ### Key design decisions
 
-- `containsPattern()` does substring matching; `isExactOrPrefixMatch()` handles commands that are only dangerous at command start position (e.g., `env`, `eval`)
+- **Segment-aware matching (`containsPatternSafe`)**: Splits command by `chain_separators` (`&&`, `||`, `;`, `$(`, `` ` ``, `|`, `\n`, `(`, `{`), identifies the first token of each segment, skips pattern matching for `safe_arg_commands` (grep, echo, git log, etc.) to prevent FPs like `grep 'import socket'` triggering reverse shell detection
+- **Shell evasion normalization (`normalizeShellEvasion`)**: Multi-pass: tab→space, `${IFS}`/`$IFS`→space, mid-word quote stripping, brace expansion `{a,b,c}`→`a b c`, backslash-newline removal, consecutive space collapse. Applied before pattern matching to defeat obfuscation
+- **Path normalization (`normalizePath`)**: Collapses `//`, `/./`, `/../` before file path checks to prevent traversal bypasses
+- **Pipe-to-shell detection (`hasPipeToShell`)**: Basename matching of pipe target token, including `env` wrapper detection (`| /usr/bin/env bash`)
+- **Commit message stripping (`stripCommitMessage`)**: Parses quoted/unquoted `-m` messages, preserves chained commands after the message. Applied BEFORE `normalizeShellEvasion` (which strips quotes)
+- **DNS exfiltration (`containsDnsCommand`)**: Word-boundary aware check prevents FPs like "digital"/"digest" matching "dig"
+- **Proc secret detection (`matchesProcSecret`)**: Extracts single path token after `/proc/` to prevent cross-command FPs
+- `containsPattern()` does simple substring matching; used intentionally for exfiltration checks where safe-arg skipping would create security holes
 - `matchesPrefixInChain()` splits on `&&`, `||`, `;` and checks each segment with `isExactOrPrefixMatch()`
 - `matchesSecretPattern()` uses basename-aware matching to prevent false positives (e.g., `.envrc`, `environment.ts` are allowed; `.env`, `.env.local` are blocked)
 - `.env.example`, `.env.template`, `.env.sample` are allowed as template files
 - `isPipLocalInstall()` checks ALL `pip install` occurrences; if any lacks `-r`/`-e`, it denies
-- Shell config files (`.zshrc`, `.gitconfig`, etc.) are blocked for Edit/Write but allowed for Read
-- System paths (`/etc/`, `/usr/`, `/System/`) are blocked for Edit/Write but allowed for Read
-- Tests inline in `src/main.zig` cover both attack patterns and false-positive prevention
+- Shell config files (`.zshrc`, `.gitconfig`, `.claude/settings`, `.cursor/mcp.json`) are blocked for Edit/Write but allowed for Read
+- System paths (`/etc/`, `/usr/`, `/System/`, `/private/etc/`, `/private/var/`) are blocked for Edit/Write but allowed for Read
+- Tests inline in `src/main.zig` cover both attack patterns and false-positive prevention (247 tests)
 
 ## Development Workflow
 
