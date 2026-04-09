@@ -11,7 +11,7 @@ ccguard is a Claude Code PreToolUse hook guard written in Zig. It reads tool cal
 ```bash
 zig build                          # Debug build
 zig build -Doptimize=ReleaseFast   # Release build
-zig build test                     # Run all tests (298 tests in src/main.zig)
+zig build test                     # Run all tests (344 tests in src/main.zig)
 ```
 
 With just (optional):
@@ -67,6 +67,9 @@ All logic lives in `src/main.zig`. The flow is:
 | `dns_exfil_commands` + `cmd_subst_indicators` | word-boundary + substring AND | Bash (DNS exfiltration) |
 | `container_escape_patterns` | substring | Bash |
 | `docker_dangerous_patterns` | substring | Bash |
+| `lib_injection_patterns` | segment-aware (`containsPatternSafe`) | Bash |
+| `cloud_metadata_patterns` | segment-aware (`containsPatternSafe`) | Bash |
+| `ssh_tunnel_flags` | compound (ssh context + flag substring) | Bash |
 | `prefix_only_commands` | exact/prefix per segment | Bash (chain-aware) |
 | `safe_arg_commands` | prefix match per segment | Bash (FP prevention) |
 | `proc_secret_files` | path-token aware | Read/Edit/Write + Bash |
@@ -88,9 +91,15 @@ All logic lives in `src/main.zig`. The flow is:
 - `matchesSecretPattern()` uses basename-aware matching to prevent false positives (e.g., `.envrc`, `environment.ts` are allowed; `.env`, `.env.local` are blocked)
 - `.env.example`, `.env.template`, `.env.sample` are allowed as template files
 - `isPipLocalInstall()` checks ALL `pip install` occurrences; if any lacks `-r`/`-e`, it denies
-- Shell config files (`.zshrc`, `.gitconfig`, `.claude/settings`, `.cursor/mcp.json`) are blocked for Edit/Write but allowed for Read
+- Shell config files (`.zshrc`, `.gitconfig`, `.claude/settings`, `.cursor/mcp.json`, `.mcp.json`, `.cursor/rules`) are blocked for Edit/Write but allowed for Read
 - System paths (`/etc/`, `/usr/`, `/System/`, `/private/etc/`, `/private/var/`) are blocked for Edit/Write but allowed for Read
-- Tests inline in `src/main.zig` cover both attack patterns and false-positive prevention (298 tests)
+- **Excessive chaining defense (`countChainSegments`)**: Counts `&&` and `||` separators; >50 segments denied to prevent deny-rules bypass attacks
+- **Library injection defense**: Blocks `LD_PRELOAD=`, `DYLD_INSERT_LIBRARIES=`, `LD_LIBRARY_PATH=` (segment-aware)
+- **Cloud metadata defense**: Blocks `169.254.169.254`, `metadata.google.internal`, `metadata.internal/` (segment-aware)
+- **SSH tunneling defense**: Compound check requiring `ssh ` context plus tunnel flags (`-R`, `-L`, `-D`)
+- **Git credential theft defense**: Blocks `credential.helper`, `git credential-`, `git credential ` in commands
+- **Heredoc/herestring to shell**: Blocks `bash <<`, `sh <<`, `zsh <<` and no-space variants
+- Tests inline in `src/main.zig` cover both attack patterns and false-positive prevention (344 tests)
 
 ## Development Workflow
 
