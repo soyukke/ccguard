@@ -4,14 +4,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-ccguard is a Claude Code PreToolUse hook guard written in Zig. It reads tool call JSON from stdin, evaluates it against security rules, and exits 0 (allow) or 2 (deny). Single-file implementation in `src/main.zig` with zero external dependencies.
+ccguard is a Claude Code PreToolUse hook guard written in Zig. It reads tool call JSON from stdin, evaluates it against security rules, and exits 0 (allow) or 2 (deny). Zero external dependencies.
 
 ## Build & Test Commands
 
 ```bash
 zig build                          # Debug build
 zig build -Doptimize=ReleaseFast   # Release build
-zig build test                     # Run all tests (344 tests in src/main.zig)
+zig build test                     # Run all tests (344 tests in src/tests.zig)
 ```
 
 With just (optional):
@@ -25,17 +25,44 @@ just bench     # Benchmark all rule categories
 
 ## Architecture
 
-All logic lives in `src/main.zig`. The flow is:
+### Module Structure
 
-1. **main()** reads up to 64KB JSON from stdin, parses into `HookInput`
-2. **evaluate()** dispatches by `tool_name`:
+| Module | Responsibility |
+|---|---|
+| `src/types.zig` | Data types: `HookInput`, `ToolInput`, `Decision`, `RuleResult` |
+| `src/rules.zig` | Security policy pattern arrays (pure configuration data, no logic) |
+| `src/normalizer.zig` | Input normalization pipeline: `normalizePath`, `normalizeShellEvasion`, `stripCommitMessage` |
+| `src/path_matcher.zig` | Path-based matching: `basename`, `matchesSecretPattern`, `matchesProcSecret` |
+| `src/shell_analyzer.zig` | Shell segment analysis: `containsPattern(Safe)`, `stripShellPrefix`, `isSafeArgCommand`, `isEnvDump`, `matchesPrefixInChain`, `countChainSegments`. Owns internal tables: `chain_separators`, `safe_arg_commands` |
+| `src/shell_detector.zig` | Shell execution detection: `hasPipeToShell`, `hasProcessSubstitutionShell`, `isPipLocalInstall`, `containsDnsCommand`. Owns internal table: `pip_local_flags` |
+| `src/evaluator.zig` | Rule evaluation orchestration: `checkBashCommand`, `checkFileAccess`, `evaluate` |
+| `src/main.zig` | Entry point & I/O: `main`, `writeOutput` |
+| `src/tests.zig` | All 344 integration tests |
+
+Dependency graph (no cycles):
+```
+types        (standalone)
+rules        (standalone — policy patterns only)
+normalizer   (standalone)
+path_matcher ← rules
+shell_analyzer (standalone — owns detection-mechanics tables)
+shell_detector ← rules, path_matcher
+evaluator    ← types, rules, normalizer, path_matcher, shell_analyzer, shell_detector
+main         ← types, evaluator
+tests        ← evaluator
+```
+
+### Flow
+
+1. **main()** (`main.zig`) reads up to 64KB JSON from stdin, parses into `HookInput`
+2. **evaluate()** (`evaluator.zig`) dispatches by `tool_name`:
    - `Bash` → `checkBashCommand()` with normalization pipeline + pattern matching
    - `Read` → `checkFileAccess()` against secret file patterns only
    - `Edit`/`Write` → `checkFileAccess()` against secret files, shell config, and system paths
    - Unknown tools → allow
-3. **writeOutput()** emits PreToolUse hook JSON response with allow/deny decision
+3. **writeOutput()** (`main.zig`) emits PreToolUse hook JSON response with allow/deny decision
 
-### checkBashCommand Normalization Pipeline
+### checkBashCommand Normalization Pipeline (`normalizer.zig` → `shell_analyzer.zig`)
 
 1. Block ANSI-C quoting (`\x`, `\0`) on raw input
 2. `stripCommitMessage()` — remove `-m "..."` content to prevent FPs from commit messages
@@ -52,7 +79,7 @@ All logic lives in `src/main.zig`. The flow is:
 3. `matchesProcSecret()` — `/proc/*/environ`, `/proc/*/cmdline`
 4. Edit/Write only: `shell_config_patterns`, `system_path_patterns`
 
-### Rule Categories (pattern arrays at module level)
+### Rule Categories (pattern arrays in `rules.zig`)
 
 | Array | Check Type | Applies To |
 |---|---|---|
@@ -99,7 +126,7 @@ All logic lives in `src/main.zig`. The flow is:
 - **SSH tunneling defense**: Compound check requiring `ssh ` context plus tunnel flags (`-R`, `-L`, `-D`)
 - **Git credential theft defense**: Blocks `credential.helper`, `git credential-`, `git credential ` in commands
 - **Heredoc/herestring to shell**: Blocks `bash <<`, `sh <<`, `zsh <<` and no-space variants
-- Tests inline in `src/main.zig` cover both attack patterns and false-positive prevention (344 tests)
+- Tests in `src/tests.zig` cover both attack patterns and false-positive prevention (344 tests)
 
 ## Development Workflow
 
