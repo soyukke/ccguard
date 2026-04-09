@@ -11,7 +11,7 @@ ccguard is a Claude Code PreToolUse hook guard written in Zig. It reads tool cal
 ```bash
 zig build                          # Debug build
 zig build -Doptimize=ReleaseFast   # Release build
-zig build test                     # Run all tests (111 tests in src/main.zig)
+zig build test                     # Run all tests (217 tests in src/main.zig)
 ```
 
 With just (optional):
