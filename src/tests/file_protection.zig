@@ -226,3 +226,148 @@ test "block Write .cursor/rules" {
     const r = evaluate(.{ .tool_name = "Write", .tool_input = .{ .file_path = "/home/user/.cursor/rules/inject.md" } });
     try std.testing.expectEqual(.deny, r.decision);
 }
+
+// --- IDE / MCP config protection (extended) ---
+
+test "block Write .vscode/mcp.json" {
+    const r = evaluate(.{ .tool_name = "Write", .tool_input = .{ .file_path = "/home/user/project/.vscode/mcp.json" } });
+    try std.testing.expectEqual(.deny, r.decision);
+}
+
+test "block Edit .vscode/settings.json" {
+    const r = evaluate(.{ .tool_name = "Edit", .tool_input = .{ .file_path = "/home/user/project/.vscode/settings.json" } });
+    try std.testing.expectEqual(.deny, r.decision);
+}
+
+test "block Write cline_mcp_settings.json" {
+    const r = evaluate(.{ .tool_name = "Write", .tool_input = .{ .file_path = "/home/user/project/cline_mcp_settings.json" } });
+    try std.testing.expectEqual(.deny, r.decision);
+}
+
+test "block Write .continue/config.json" {
+    const r = evaluate(.{ .tool_name = "Write", .tool_input = .{ .file_path = "/home/user/.continue/config.json" } });
+    try std.testing.expectEqual(.deny, r.decision);
+}
+
+test "block bash writing .vscode/mcp.json" {
+    const r = evaluate(.{ .tool_name = "Bash", .tool_input = .{ .command = "cat payload > .vscode/mcp.json" } });
+    try std.testing.expectEqual(.deny, r.decision);
+}
+
+test "allow Read .vscode/settings.json" {
+    const r = evaluate(.{ .tool_name = "Read", .tool_input = .{ .file_path = "/home/user/project/.vscode/settings.json" } });
+    try std.testing.expectEqual(.allow, r.decision);
+}
+
+test "allow Read .continue/config.json" {
+    const r = evaluate(.{ .tool_name = "Read", .tool_input = .{ .file_path = "/home/user/.continue/config.json" } });
+    try std.testing.expectEqual(.allow, r.decision);
+}
+
+test "allow Write normal .json in .vscode" {
+    const r = evaluate(.{ .tool_name = "Write", .tool_input = .{ .file_path = "/home/user/project/.vscode/launch.json" } });
+    try std.testing.expectEqual(.allow, r.decision);
+}
+
+// --- JetBrains IDE config protection (IDEsaster CVE-2025-54130) ---
+
+test "block Write .idea/workspace.xml" {
+    const r = evaluate(.{ .tool_name = "Write", .tool_input = .{ .file_path = "/home/user/project/.idea/workspace.xml" } });
+    try std.testing.expectEqual(.deny, r.decision);
+}
+
+test "block Edit .idea/workspace.xml" {
+    const r = evaluate(.{ .tool_name = "Edit", .tool_input = .{ .file_path = "/home/user/project/.idea/workspace.xml" } });
+    try std.testing.expectEqual(.deny, r.decision);
+}
+
+test "block Write .idea/misc.xml" {
+    const r = evaluate(.{ .tool_name = "Write", .tool_input = .{ .file_path = "/home/user/project/.idea/misc.xml" } });
+    try std.testing.expectEqual(.deny, r.decision);
+}
+
+test "allow Read .idea/workspace.xml" {
+    const r = evaluate(.{ .tool_name = "Read", .tool_input = .{ .file_path = "/home/user/project/.idea/workspace.xml" } });
+    try std.testing.expectEqual(.allow, r.decision);
+}
+
+test "block bash writing .idea/workspace.xml" {
+    const r = evaluate(.{ .tool_name = "Bash", .tool_input = .{ .command = "cp evil.xml .idea/workspace.xml" } });
+    try std.testing.expectEqual(.deny, r.decision);
+}
+
+// --- VSCode workspace file protection (IDEsaster) ---
+
+test "block Write .code-workspace file" {
+    const r = evaluate(.{ .tool_name = "Write", .tool_input = .{ .file_path = "/home/user/project/myproject.code-workspace" } });
+    try std.testing.expectEqual(.deny, r.decision);
+}
+
+test "block Edit .code-workspace file" {
+    const r = evaluate(.{ .tool_name = "Edit", .tool_input = .{ .file_path = "/home/user/project/app.code-workspace" } });
+    try std.testing.expectEqual(.deny, r.decision);
+}
+
+test "allow Read .code-workspace file" {
+    const r = evaluate(.{ .tool_name = "Read", .tool_input = .{ .file_path = "/home/user/project/myproject.code-workspace" } });
+    try std.testing.expectEqual(.allow, r.decision);
+}
+
+test "block bash writing .code-workspace" {
+    const r = evaluate(.{ .tool_name = "Bash", .tool_input = .{ .command = "tee myproject.code-workspace < payload" } });
+    try std.testing.expectEqual(.deny, r.decision);
+}
+
+// --- AI IDE instruction file protection (prompt injection vector) ---
+
+test "block Write .github/copilot-instructions.md" {
+    const r = evaluate(.{ .tool_name = "Write", .tool_input = .{ .file_path = "/home/user/project/.github/copilot-instructions.md" } });
+    try std.testing.expectEqual(.deny, r.decision);
+}
+
+test "block Edit .github/copilot-instructions.md" {
+    const r = evaluate(.{ .tool_name = "Edit", .tool_input = .{ .file_path = "/home/user/project/.github/copilot-instructions.md" } });
+    try std.testing.expectEqual(.deny, r.decision);
+}
+
+test "allow Read .github/copilot-instructions.md" {
+    const r = evaluate(.{ .tool_name = "Read", .tool_input = .{ .file_path = "/home/user/project/.github/copilot-instructions.md" } });
+    try std.testing.expectEqual(.allow, r.decision);
+}
+
+test "block Write .cursorrules" {
+    const r = evaluate(.{ .tool_name = "Write", .tool_input = .{ .file_path = "/home/user/project/.cursorrules" } });
+    try std.testing.expectEqual(.deny, r.decision);
+}
+
+test "allow Read .cursorrules" {
+    const r = evaluate(.{ .tool_name = "Read", .tool_input = .{ .file_path = "/home/user/project/.cursorrules" } });
+    try std.testing.expectEqual(.allow, r.decision);
+}
+
+test "block Write .kiro/settings" {
+    const r = evaluate(.{ .tool_name = "Write", .tool_input = .{ .file_path = "/home/user/project/.kiro/settings.json" } });
+    try std.testing.expectEqual(.deny, r.decision);
+}
+
+test "allow Read .kiro/settings" {
+    const r = evaluate(.{ .tool_name = "Read", .tool_input = .{ .file_path = "/home/user/project/.kiro/settings.json" } });
+    try std.testing.expectEqual(.allow, r.decision);
+}
+
+test "allow Write normal .github file" {
+    const r = evaluate(.{ .tool_name = "Write", .tool_input = .{ .file_path = "/home/user/project/.github/workflows/ci.yml" } });
+    try std.testing.expectEqual(.allow, r.decision);
+}
+
+// --- Bypass regression: relative path for .kiro/ ---
+
+test "block Write .kiro/ relative path" {
+    const r = evaluate(.{ .tool_name = "Write", .tool_input = .{ .file_path = ".kiro/settings.json" } });
+    try std.testing.expectEqual(.deny, r.decision);
+}
+
+test "block bash writing .kiro/ relative" {
+    const r = evaluate(.{ .tool_name = "Bash", .tool_input = .{ .command = "cp payload .kiro/spec.kiro" } });
+    try std.testing.expectEqual(.deny, r.decision);
+}

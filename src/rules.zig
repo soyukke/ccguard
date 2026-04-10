@@ -282,6 +282,9 @@ pub const prefix_only_commands = [_][]const u8{
     "security",
     "at",
     "batch",
+    // Script sourcing — executes arbitrary scripts in current shell
+    "source",
+    ".",
 };
 
 // System paths that should not be edited/written
@@ -315,6 +318,19 @@ pub const shell_config_patterns = [_][]const u8{
     // MCP configuration protection
     ".mcp.json",
     "/.cursor/rules",
+    // VSCode / IDE MCP and settings protection
+    ".vscode/mcp.json",
+    ".vscode/settings.json",
+    "cline_mcp_settings.json",
+    "/.continue/config.json",
+    // JetBrains IDE config protection (IDEsaster CVE-2025-54130)
+    ".idea/",
+    // VSCode workspace file protection (IDEsaster)
+    ".code-workspace",
+    // AI IDE instruction files (prompt injection vector)
+    "copilot-instructions.md",
+    ".cursorrules",
+    ".kiro/",
 };
 
 // safe_arg_commands moved to shell_analyzer.zig (detection mechanics, not policy)
@@ -326,3 +342,53 @@ pub const env_template_suffixes = [_][]const u8{
 };
 
 // chain_separators moved to shell_analyzer.zig (detection mechanics, not policy)
+
+// Custom package registry flags — supply chain attack vector (AC-1.a)
+pub const custom_registry_patterns = [_][]const u8{
+    "--index-url ",
+    "--index-url=",
+    "--extra-index-url ",
+    "--extra-index-url=",
+    "install -i https://",
+    "install -i http://",
+    "--registry ",
+    "--registry=",
+};
+
+// Credential literal patterns — inline API key exfiltration (AC-2)
+// Used with network_commands in compound check
+pub const credential_literal_patterns = [_][]const u8{
+    "AKIA",          // AWS Access Key ID prefix
+    "ghp_",          // GitHub personal access token
+    "gho_",          // GitHub OAuth token
+    "ghs_",          // GitHub Actions token
+    "github_pat_",   // GitHub fine-grained PAT
+    "sk-proj-",      // OpenAI project API key
+    "sk-ant-",       // Anthropic API key
+    "xoxb-",         // Slack Bot Token
+    "xoxp-",         // Slack User Token
+    "glpat-",        // GitLab Personal Access Token
+};
+
+// Sensitive environment variable names — exfiltration via network commands (AC-2)
+// Used with network_commands in compound check
+pub const sensitive_env_vars = [_][]const u8{
+    "$OPENAI_API_KEY",
+    "$ANTHROPIC_API_KEY",
+    "$AWS_SECRET_ACCESS_KEY",
+    "$AWS_ACCESS_KEY_ID",
+    "$GITHUB_TOKEN",
+    "$GH_TOKEN",
+    "$GITLAB_TOKEN",
+    "$SLACK_TOKEN",
+    "$SLACK_BOT_TOKEN",
+    "${OPENAI_API_KEY}",
+    "${ANTHROPIC_API_KEY}",
+    "${AWS_SECRET_ACCESS_KEY}",
+    "${AWS_ACCESS_KEY_ID}",
+    "${GITHUB_TOKEN}",
+    "${GH_TOKEN}",
+    "${GITLAB_TOKEN}",
+    "${SLACK_TOKEN}",
+    "${SLACK_BOT_TOKEN}",
+};

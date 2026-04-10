@@ -15,4 +15,5 @@ comptime {
     _ = @import("tests/chain_bypass.zig");
     _ = @import("tests/false_positives.zig");
     _ = @import("tests/git.zig");
+    _ = @import("tests/supply_chain.zig");
 }

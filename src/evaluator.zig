@@ -44,12 +44,29 @@ fn checkBashCommand(raw_command: []const u8) RuleResult {
         return .{ .decision = .deny, .reason = "potential secret exfiltration blocked" };
     }
 
+    // Credential literal in network commands — AC-2 defense
+    // Uses containsPatternSafe for credential patterns (skip grep/echo args)
+    // but containsPattern for network commands (any network tool counts)
+    if (analyzer.containsPattern(command, &rules.network_commands) and analyzer.containsPatternSafe(command, &rules.credential_literal_patterns)) {
+        return .{ .decision = .deny, .reason = "credential leakage in network command blocked" };
+    }
+
+    // Sensitive env var in network commands — AC-2 defense
+    if (analyzer.containsPattern(command, &rules.network_commands) and analyzer.containsPattern(command, &rules.sensitive_env_vars)) {
+        return .{ .decision = .deny, .reason = "sensitive env var exfiltration blocked" };
+    }
+
     if (analyzer.containsPatternSafe(command, &rules.pipe_shell_patterns) or detector.hasPipeToShell(command) or detector.hasProcessSubstitutionShell(command)) {
         return .{ .decision = .deny, .reason = "pipe-to-shell execution blocked" };
     }
 
     if (analyzer.containsPatternSafe(command, &rules.global_install_commands) and !detector.isPipLocalInstall(command)) {
         return .{ .decision = .deny, .reason = "global package install blocked" };
+    }
+
+    // Custom package registry — supply chain attack (AC-1.a)
+    if (analyzer.containsPatternSafe(command, &rules.custom_registry_patterns)) {
+        return .{ .decision = .deny, .reason = "custom package registry blocked" };
     }
 
     if (analyzer.containsPatternSafe(command, &rules.history_evasion_commands)) {

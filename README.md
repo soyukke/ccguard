@@ -32,6 +32,10 @@ AI coding assistants can accidentally run destructive commands, read secrets, or
 | **Docker dangerous ops** | `--privileged`, `-v /:/host` | Block privileged container access |
 | **macOS system commands** | `osascript`, `defaults write`, `diskutil`, `security` | Block system tampering |
 | **/proc sensitive access** | `/proc/self/environ`, `/proc/*/cmdline` | Block process secret access |
+| **Custom package registry** | `pip install --index-url`, `npm --registry` | Block supply chain attacks |
+| **Credential leakage** | `curl` + `AKIA*`, `ghp_*`, `sk-proj-*`, `xoxb-*` | Block API key exfiltration |
+| **Sensitive env var exfiltration** | `curl` + `$OPENAI_API_KEY`, `$AWS_SECRET_ACCESS_KEY` | Block credential exfiltration |
+| **Script sourcing** | `source script.sh`, `. setup.sh` | Block arbitrary script execution |
 
 ### File access (Read / Edit / Write)
 
@@ -40,6 +44,7 @@ AI coding assistants can accidentally run destructive commands, read secrets, or
 | **Secret file access** | Read, Edit, Write | `.env`, `.ssh/`, `.aws/`, `*.pem`, `credentials` | Prevent secret leaks |
 | **/proc sensitive access** | Read, Edit, Write | `/proc/self/environ`, `/proc/*/cmdline` | Block process secret access |
 | **Shell config modification** | Edit, Write only | `.zshrc`, `.bashrc`, `.gitconfig`, `.claude/settings` | Protect shell environment |
+| **IDE/MCP config protection** | Edit, Write only | `.vscode/settings.json`, `.idea/`, `.code-workspace`, `.cursorrules`, `copilot-instructions.md`, `.kiro/` | Prevent agent trust boundary attacks |
 | **System path protection** | Edit, Write only | `/etc/`, `/usr/`, `/System/`, `/Library/LaunchDaemons/` | Protect system files |
 
 ## Install
@@ -137,6 +142,17 @@ just release   # Release build
 just install   # Release build + install to ~/.local/bin
 just bench     # Benchmark all rule categories
 ```
+
+## References
+
+- Liu, H., Shou, C., Wen, H., Chen, Y., Fang, R. J., & Feng, Y. (2025). *Your Agent Is Mine: Measuring Malicious Intermediary Attacks on the LLM Supply Chain*. arXiv:2604.08407. https://arxiv.org/abs/2604.08407
+  - Supply chain attack defense rules (custom registry detection, credential leakage, sensitive env var exfiltration) are based on findings from this paper.
+- Marzouk, A. (2025). *IDEsaster: A Novel Vulnerability Class in AI IDEs*. https://maccarita.com/posts/idesaster/
+  - IDE config protection rules (`.idea/`, `.code-workspace`, `.cursorrules`, `copilot-instructions.md`, `.kiro/`) are based on CVE-2025-53773, CVE-2025-54130, and related vulnerabilities.
+- Luo, Q., Ye, J., Chen, H., Tan, K., & Hou, B. (2025). *"Your AI, My Shell": Demystifying Prompt Injection Attacks on Agentic AI Coding Editors*. arXiv:2509.22040. https://arxiv.org/abs/2509.22040
+  - Validated existing rules against 314 AIShellJack attack payloads covering 70 MITRE ATT&CK techniques.
+- Maloyan, A. (2026). *Prompt Injection Attacks on Agentic Coding Assistants: A Systematic Analysis of Vulnerabilities in Skills, Tools, and Protocol Ecosystems*. arXiv:2601.17548. https://arxiv.org/abs/2601.17548
+  - AI IDE instruction file protection (`copilot-instructions.md`, `.cursorrules`) is informed by this analysis.
 
 ## License
 
