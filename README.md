@@ -1,16 +1,14 @@
 # ccguard
 
-Ultra-lightweight [Claude Code](https://docs.anthropic.com/en/docs/claude-code) hook guard written in Zig.
+[Claude Code](https://docs.anthropic.com/en/docs/claude-code) が `rm -rf /` を実行する前に止める、Zig 製のセキュリティガード。
 
-**304KB binary, ~0ms latency** — runs on every tool call without you noticing.
-
-ccguard acts as a `PreToolUse` hook that inspects every tool call (Bash, Read, Edit, Write) and blocks dangerous operations before they execute.
+シェル回避・難読化を正規化してからパターンマッチするため、単純な文字列ブロックリストでは防げない攻撃も検知する。外部依存ゼロ、単一バイナリ。
 
 ![demo](demo/demo.gif)
 
 ## Why
 
-AI coding assistants can accidentally run destructive commands, read secrets, or install unwanted packages. Instead of maintaining a massive deny list in `settings.json`, ccguard provides a single binary that guards all tool calls with composable rules.
+AI coding assistants can accidentally run destructive commands, read secrets, or install unwanted packages. Instead of maintaining a massive deny list in `settings.json`, ccguard inspects every tool call as a `PreToolUse` hook and blocks dangerous operations with shell-aware pattern matching.
 
 ## Rules
 
@@ -106,7 +104,6 @@ That's it. Every tool call is now guarded.
 ## Test
 
 ```bash
-# Run all 298 tests
 zig build test
 
 # Manual test
