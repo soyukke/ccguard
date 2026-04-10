@@ -116,3 +116,14 @@ test "allow grep nsenter in docs" {
     const r = evaluate(.{ .tool_name = "Bash", .tool_input = .{ .command = "grep 'nsenter ' docs/security.md" } });
     try std.testing.expectEqual(.allow, r.decision);
 }
+
+test "allow ssh after echo mentioning ssh -R" {
+    // echo argument should not trigger SSH tunnel detection for a legitimate ssh command
+    const r = evaluate(.{ .tool_name = "Bash", .tool_input = .{ .command = "echo 'ssh -R forwarding' && ssh user@host" } });
+    try std.testing.expectEqual(.allow, r.decision);
+}
+
+test "allow grep ssh tunnel flags in docs" {
+    const r = evaluate(.{ .tool_name = "Bash", .tool_input = .{ .command = "grep 'ssh -L 8080' README.md" } });
+    try std.testing.expectEqual(.allow, r.decision);
+}

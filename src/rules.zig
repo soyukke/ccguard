@@ -69,6 +69,9 @@ pub const reverse_shell_patterns = [_][]const u8{
     "__import__",
 };
 
+// Shell binary names — single source of truth for pipe-to-shell, process substitution, heredoc detection
+pub const shell_names = [_][]const u8{ "bash", "sh", "zsh", "dash", "fish", "ksh", "csh", "tcsh" };
+
 // Pipe-to-shell execution patterns
 pub const pipe_shell_patterns = [_][]const u8{
     "| bash",
@@ -96,10 +99,20 @@ pub const pipe_shell_patterns = [_][]const u8{
     "bash <<",
     "sh <<",
     "zsh <<",
+    "dash <<",
+    "fish <<",
+    "ksh <<",
+    "csh <<",
+    "tcsh <<",
     // No-space variants
     "bash<<<",
     "sh<<<",
     "zsh<<<",
+    "dash<<<",
+    "fish<<<",
+    "ksh<<<",
+    "csh<<<",
+    "tcsh<<<",
 };
 
 // Patterns that indicate sensitive files (path-segment aware)

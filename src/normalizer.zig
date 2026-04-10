@@ -167,10 +167,21 @@ pub fn normalizeShellEvasion(buf: []u8, input: []const u8) []const u8 {
     return buf[0..len3];
 }
 
+fn isAtSegmentStart(command: []const u8, idx: usize) bool {
+    if (idx == 0) return true;
+    var i = idx;
+    while (i > 0 and command[i - 1] == ' ') i -= 1;
+    if (i == 0) return true;
+    const prev = command[i - 1];
+    return prev == '&' or prev == '|' or prev == ';' or prev == '(' or prev == '\n';
+}
+
 pub fn stripCommitMessage(buf: []u8, command: []const u8) []const u8 {
     // Strip only the -m message content from git commit, preserving chained commands after.
     // "git commit -m "msg" && rm -rf /" → "git commit  && rm -rf /"
+    // Only match "git commit" at a chain segment start (not inside echo/grep arguments).
     const commit_idx = std.mem.indexOf(u8, command, "git commit") orelse return command;
+    if (!isAtSegmentStart(command, commit_idx)) return command;
     const after_commit = command[commit_idx..];
 
     // Find -m flag

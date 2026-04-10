@@ -82,3 +82,20 @@ test "block git credential fill" {
     const r = evaluate(.{ .tool_name = "Bash", .tool_input = .{ .command = "git credential fill" } });
     try std.testing.expectEqual(.deny, r.decision);
 }
+
+test "allow echo git commit then python -m" {
+    // stripCommitMessage should not match git commit inside echo arguments
+    const r = evaluate(.{ .tool_name = "Bash", .tool_input = .{ .command = "echo 'git commit done' && python3 -m http.server" } });
+    try std.testing.expectEqual(.allow, r.decision);
+}
+
+test "allow grep git commit then command with -m" {
+    const r = evaluate(.{ .tool_name = "Bash", .tool_input = .{ .command = "grep 'git commit' log.txt && python3 -m pytest" } });
+    try std.testing.expectEqual(.allow, r.decision);
+}
+
+test "block proc access despite echo git commit with -m" {
+    // echo "git commit" should NOT cause stripCommitMessage to strip -m /proc/self/environ
+    const r = evaluate(.{ .tool_name = "Bash", .tool_input = .{ .command = "echo \"git commit\" && cat -m /proc/self/environ" } });
+    try std.testing.expectEqual(.deny, r.decision);
+}

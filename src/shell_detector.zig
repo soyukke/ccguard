@@ -18,7 +18,7 @@ const pip_local_flags = [_][]const u8{
 
 // Check if a command pipes to any shell binary (including custom paths like /usr/local/bin/bash)
 pub fn hasPipeToShell(command: []const u8) bool {
-    const shell_names = [_][]const u8{ "bash", "sh", "zsh" };
+    const shell_names = rules.shell_names;
     var i: usize = 0;
     while (i < command.len) {
         if (command[i] == '|') {
@@ -67,9 +67,10 @@ pub fn hasPipeToShell(command: []const u8) bool {
     return false;
 }
 
-// Check if command uses process substitution to execute a shell: bash <(...), sh <(...), source <(...), . <(...)
+// Check if command uses process substitution to execute a shell: bash <(...), sh <(...), . <(...)
+// Note: "source <(...)" is caught by prefix_only_commands via matchesPrefixInChain, not here.
 pub fn hasProcessSubstitutionShell(command: []const u8) bool {
-    const shell_names = [_][]const u8{ "bash", "sh", "zsh", "source" };
+    const shell_names = rules.shell_names;
     var i: usize = 0;
     while (std.mem.indexOfPos(u8, command, i, "<(")) |idx| {
         if (idx == 0) {
@@ -99,7 +100,8 @@ pub fn hasProcessSubstitutionShell(command: []const u8) bool {
 // --- Pip install detection ---
 
 pub fn isPipLocalInstall(command: []const u8) bool {
-    // Check ALL occurrences of pip install. If any lacks a local flag, return false.
+    // Check ALL occurrences of pip install. If any lacks a local flag or has extra
+    // package names after the flag argument, return false.
     const prefixes = [_][]const u8{ "pip install ", "pip3 install " };
     var found_any = false;
     for (prefixes) |prefix| {
@@ -108,19 +110,47 @@ pub fn isPipLocalInstall(command: []const u8) bool {
             if (std.mem.indexOfPos(u8, command, offset, prefix)) |idx| {
                 found_any = true;
                 const after = command[idx + prefix.len ..];
-                var has_local_flag = false;
-                for (pip_local_flags) |flag| {
-                    if (std.mem.startsWith(u8, after, flag)) {
-                        has_local_flag = true;
-                        break;
-                    }
-                }
-                if (!has_local_flag) return false;
+                if (!isLocalOnlyArgs(after)) return false;
                 offset = idx + prefix.len;
             } else break;
         }
     }
     return found_any;
+}
+
+// Check that pip install arguments contain only local flags (-r file, -e path)
+// and pip option flags (--flag), with no bare package names.
+fn isLocalOnlyArgs(args: []const u8) bool {
+    var has_local_flag = false;
+    var i: usize = 0;
+    while (i < args.len) {
+        // Skip whitespace
+        while (i < args.len and args[i] == ' ') i += 1;
+        if (i >= args.len) break;
+
+        // Stop at chain separators
+        if (args[i] == '&' or args[i] == '|' or args[i] == ';') break;
+
+        if (args[i] == '-') {
+            // Check for local flags that take an argument
+            for (pip_local_flags) |flag| {
+                if (std.mem.startsWith(u8, args[i..], flag)) {
+                    has_local_flag = true;
+                    i += flag.len;
+                    // Skip the flag's argument (the file/path)
+                    while (i < args.len and args[i] != ' ' and args[i] != '&' and args[i] != '|' and args[i] != ';') i += 1;
+                    break;
+                }
+            } else {
+                // Other flag (--no-cache-dir, --quiet, etc.) — skip it
+                while (i < args.len and args[i] != ' ' and args[i] != '&' and args[i] != '|' and args[i] != ';') i += 1;
+            }
+        } else {
+            // Bare word that is not a flag — this is a package name
+            return false;
+        }
+    }
+    return has_local_flag;
 }
 
 // --- DNS exfiltration detection ---

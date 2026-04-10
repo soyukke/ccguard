@@ -34,8 +34,10 @@ pub fn main() !void {
         .ignore_unknown_fields = true,
     }) catch {
         const out: std.fs.File = .stdout();
-        try writeOutput(out.deprecatedWriter(), .{ .decision = .allow, .reason = "" });
-        return;
+        try writeOutput(out.deprecatedWriter(), .{ .decision = .deny, .reason = "invalid input" });
+        const err_out: std.fs.File = .stderr();
+        try err_out.deprecatedWriter().writeAll("ccguard: invalid input\n");
+        std.process.exit(2);
     };
     defer parsed.deinit();
 

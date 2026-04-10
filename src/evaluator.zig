@@ -112,7 +112,7 @@ fn checkBashCommand(raw_command: []const u8) RuleResult {
     }
 
     // SSH tunneling / port forwarding (requires "ssh " context + tunnel flag)
-    if (analyzer.containsPatternSafe(command, &rules.ssh_context) and analyzer.containsPattern(command, &rules.ssh_tunnel_flags)) {
+    if (analyzer.containsPatternSafe(command, &rules.ssh_context) and analyzer.containsPatternSafe(command, &rules.ssh_tunnel_flags)) {
         return .{ .decision = .deny, .reason = "SSH tunneling blocked" };
     }
 

@@ -61,3 +61,29 @@ test "block pip install evil before -r flag" {
     const r = evaluate(.{ .tool_name = "Bash", .tool_input = .{ .command = "pip install evil-package && pip install -r requirements.txt" } });
     try std.testing.expectEqual(.deny, r.decision);
 }
+
+test "block pip install --requirement with extra package" {
+    // pip install --requirement req.txt evil-package installs BOTH
+    const r = evaluate(.{ .tool_name = "Bash", .tool_input = .{ .command = "pip install --requirement requirements.txt evil-package" } });
+    try std.testing.expectEqual(.deny, r.decision);
+}
+
+test "block pip install -r with extra package" {
+    const r = evaluate(.{ .tool_name = "Bash", .tool_input = .{ .command = "pip install -r requirements.txt evil-package" } });
+    try std.testing.expectEqual(.deny, r.decision);
+}
+
+test "block pip install -e with extra package" {
+    const r = evaluate(.{ .tool_name = "Bash", .tool_input = .{ .command = "pip install -e . evil-package" } });
+    try std.testing.expectEqual(.deny, r.decision);
+}
+
+test "allow pip install --requirement only" {
+    const r = evaluate(.{ .tool_name = "Bash", .tool_input = .{ .command = "pip install --requirement requirements.txt" } });
+    try std.testing.expectEqual(.allow, r.decision);
+}
+
+test "allow pip install -r with multiple flags" {
+    const r = evaluate(.{ .tool_name = "Bash", .tool_input = .{ .command = "pip install -r requirements.txt --no-cache-dir --quiet" } });
+    try std.testing.expectEqual(.allow, r.decision);
+}
