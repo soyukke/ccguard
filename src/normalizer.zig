@@ -32,7 +32,7 @@ pub fn normalizePath(buf: []u8, path: []const u8) []const u8 {
     return buf[0..out];
 }
 
-pub fn isShellSeparator(c: u8) bool {
+fn isShellSeparator(c: u8) bool {
     return std.ascii.isWhitespace(c) or c == ';' or c == '|' or c == '&' or c == '(' or c == ')' or c == '{' or c == '}' or c == '<' or c == '>';
 }
 
