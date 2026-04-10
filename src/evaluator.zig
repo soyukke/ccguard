@@ -48,13 +48,8 @@ fn checkBashCommand(raw_command: []const u8) RuleResult {
         return .{ .decision = .deny, .reason = "pipe-to-shell execution blocked" };
     }
 
-    if (analyzer.containsPatternSafe(command, &rules.global_install_commands)) {
-        // Allow pip local installs only if flag immediately follows "pip install "
-        if (detector.isPipLocalInstall(command)) {
-            // local install, allow
-        } else {
-            return .{ .decision = .deny, .reason = "global package install blocked" };
-        }
+    if (analyzer.containsPatternSafe(command, &rules.global_install_commands) and !detector.isPipLocalInstall(command)) {
+        return .{ .decision = .deny, .reason = "global package install blocked" };
     }
 
     if (analyzer.containsPatternSafe(command, &rules.history_evasion_commands)) {
@@ -81,7 +76,7 @@ fn checkBashCommand(raw_command: []const u8) RuleResult {
         return .{ .decision = .deny, .reason = "container escape blocked" };
     }
 
-    if (analyzer.containsPatternSafe(command, &[_][]const u8{"docker "}) and analyzer.containsPatternSafe(command, &rules.docker_dangerous_patterns)) {
+    if (analyzer.containsPatternSafe(command, &rules.docker_context) and analyzer.containsPatternSafe(command, &rules.docker_dangerous_patterns)) {
         return .{ .decision = .deny, .reason = "dangerous docker operation blocked" };
     }
 
@@ -100,7 +95,7 @@ fn checkBashCommand(raw_command: []const u8) RuleResult {
     }
 
     // SSH tunneling / port forwarding (requires "ssh " context + tunnel flag)
-    if (analyzer.containsPatternSafe(command, &[_][]const u8{"ssh "}) and analyzer.containsPattern(command, &rules.ssh_tunnel_flags)) {
+    if (analyzer.containsPatternSafe(command, &rules.ssh_context) and analyzer.containsPattern(command, &rules.ssh_tunnel_flags)) {
         return .{ .decision = .deny, .reason = "SSH tunneling blocked" };
     }
 

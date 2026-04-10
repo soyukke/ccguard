@@ -36,45 +36,30 @@ fn isShellSeparator(c: u8) bool {
     return std.ascii.isWhitespace(c) or c == ';' or c == '|' or c == '&' or c == '(' or c == ')' or c == '{' or c == '}' or c == '<' or c == '>';
 }
 
-// Shell-aware normalizer:
-// - Tabs → space, ${IFS}/$IFS → space
-// - Single-quoted mid-word → quotes stripped, content kept (evasion detection)
-// - Double-quoted mid-word → quotes stripped, content kept (evasion detection)
-// - Double-quoted whole arguments → quotes stripped, content kept (secret detection needs it)
-// - Consecutive spaces collapsed
-pub fn normalizeShellEvasion(buf: []u8, input: []const u8) []const u8 {
+// Pass 1: Tabs → space, ${IFS}/$IFS → space, quote stripping, backslash-newline removal
+fn normalizeBasic(buf: []u8, input: []const u8) usize {
     var out: usize = 0;
     var i: usize = 0;
     const len = @min(input.len, buf.len);
     while (i < len) {
-        // Backslash-newline (line continuation) → remove both
         if (input[i] == '\\' and i + 1 < len and input[i + 1] == '\n') {
             i += 2;
-        }
-        // Tab → space
-        else if (input[i] == '\t') {
+        } else if (input[i] == '\t') {
             buf[out] = ' ';
             out += 1;
             i += 1;
-        }
-        // ${IFS} → space
-        else if (i + 5 < len and std.mem.eql(u8, input[i .. i + 6], "${IFS}")) {
+        } else if (i + 5 < len and std.mem.eql(u8, input[i .. i + 6], "${IFS}")) {
             buf[out] = ' ';
             out += 1;
             i += 6;
-        }
-        // $IFS → space (without braces)
-        else if (i + 3 < len and std.mem.eql(u8, input[i .. i + 4], "$IFS") and
+        } else if (i + 3 < len and std.mem.eql(u8, input[i .. i + 4], "$IFS") and
             (i + 4 >= len or (!std.ascii.isAlphanumeric(input[i + 4]) and input[i + 4] != '_')))
         {
             buf[out] = ' ';
             out += 1;
             i += 4;
-        }
-        // Single quote
-        else if (input[i] == '\'') {
+        } else if (input[i] == '\'') {
             if (std.mem.indexOfPos(u8, input, i + 1, "'")) |close| {
-                // Strip quotes, keep content (evasion detection + security)
                 const content = input[i + 1 .. close];
                 for (content) |c| {
                     if (out < buf.len) {
@@ -88,12 +73,8 @@ pub fn normalizeShellEvasion(buf: []u8, input: []const u8) []const u8 {
                 out += 1;
                 i += 1;
             }
-        }
-        // Double quote: strip quotes but always keep content
-        // (content must remain visible for secret keyword detection)
-        else if (input[i] == '"') {
+        } else if (input[i] == '"') {
             if (std.mem.indexOfPos(u8, input, i + 1, "\"")) |close| {
-                // Always strip quotes and copy content
                 const content = input[i + 1 .. close];
                 for (content) |c| {
                     if (out < buf.len) {
@@ -113,69 +94,77 @@ pub fn normalizeShellEvasion(buf: []u8, input: []const u8) []const u8 {
             i += 1;
         }
     }
+    return out;
+}
 
-    // Pass 2: normalize brace expansion {a,b,c} → a b c
-    // Only when preceded by whitespace/start/separator (command position)
-    var brace_out: usize = 0;
-    {
-        var j: usize = 0;
-        while (j < out) {
-            if (buf[j] == '{') {
-                const prev_is_sep = j == 0 or isShellSeparator(buf[j - 1]);
-                // Find matching }
-                if (std.mem.indexOfPos(u8, buf[0..out], j + 1, "}")) |close| {
-                    // Check if it contains commas (brace expansion)
-                    const inner = buf[j + 1 .. close];
-                    if (std.mem.indexOf(u8, inner, ",") != null and prev_is_sep) {
-                        // Replace { and } with space, commas with space
-                        buf[brace_out] = ' ';
-                        brace_out += 1;
-                        for (inner) |c| {
-                            if (c == ',') {
-                                buf[brace_out] = ' ';
-                            } else {
-                                buf[brace_out] = c;
-                            }
-                            brace_out += 1;
+// Pass 2: Brace expansion {a,b,c} → a b c (only in command position)
+fn expandBraces(buf: []u8, len: usize) usize {
+    var out: usize = 0;
+    var j: usize = 0;
+    while (j < len) {
+        if (buf[j] == '{') {
+            const prev_is_sep = j == 0 or isShellSeparator(buf[j - 1]);
+            if (std.mem.indexOfPos(u8, buf[0..len], j + 1, "}")) |close| {
+                const inner = buf[j + 1 .. close];
+                if (std.mem.indexOf(u8, inner, ",") != null and prev_is_sep) {
+                    buf[out] = ' ';
+                    out += 1;
+                    for (inner) |c| {
+                        if (c == ',') {
+                            buf[out] = ' ';
+                        } else {
+                            buf[out] = c;
                         }
-                        buf[brace_out] = ' ';
-                        brace_out += 1;
-                        j = close + 1;
-                    } else {
-                        buf[brace_out] = buf[j];
-                        brace_out += 1;
-                        j += 1;
+                        out += 1;
                     }
+                    buf[out] = ' ';
+                    out += 1;
+                    j = close + 1;
                 } else {
-                    buf[brace_out] = buf[j];
-                    brace_out += 1;
+                    buf[out] = buf[j];
+                    out += 1;
                     j += 1;
                 }
             } else {
-                buf[brace_out] = buf[j];
-                brace_out += 1;
+                buf[out] = buf[j];
+                out += 1;
                 j += 1;
             }
+        } else {
+            buf[out] = buf[j];
+            out += 1;
+            j += 1;
         }
     }
+    return out;
+}
 
-    // Pass 3: collapse consecutive spaces
-    var final_out: usize = 0;
+// Pass 3: Collapse consecutive spaces
+fn collapseSpaces(buf: []u8, len: usize) usize {
+    var out: usize = 0;
     var prev_space = false;
-    for (buf[0..brace_out]) |c| {
+    for (buf[0..len]) |c| {
         if (c == ' ') {
             if (!prev_space) {
-                buf[final_out] = c;
-                final_out += 1;
+                buf[out] = c;
+                out += 1;
             }
             prev_space = true;
         } else {
-            buf[final_out] = c;
-            final_out += 1;
+            buf[out] = c;
+            out += 1;
             prev_space = false;
         }
     }
-    return buf[0..final_out];
+    return out;
+}
+
+// Shell-aware normalizer: applies 3 passes in-place on buf.
+pub fn normalizeShellEvasion(buf: []u8, input: []const u8) []const u8 {
+    const len1 = normalizeBasic(buf, input);
+    const len2 = expandBraces(buf, len1);
+    const len3 = collapseSpaces(buf, len2);
+    return buf[0..len3];
 }
 
 pub fn stripCommitMessage(buf: []u8, command: []const u8) []const u8 {

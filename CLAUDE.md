@@ -11,7 +11,7 @@ ccguard is a Claude Code PreToolUse hook guard written in Zig. It reads tool cal
 ```bash
 zig build                          # Debug build
 zig build -Doptimize=ReleaseFast   # Release build
-zig build test                     # Run all tests (344 tests in src/tests.zig)
+zig build test                     # Run all tests (341 tests in src/tests.zig)
 ```
 
 With just (optional):
@@ -31,13 +31,13 @@ just bench     # Benchmark all rule categories
 |---|---|
 | `src/types.zig` | Data types: `HookInput`, `ToolInput`, `Decision`, `RuleResult` |
 | `src/rules.zig` | Security policy pattern arrays (pure configuration data, no logic) |
-| `src/normalizer.zig` | Input normalization pipeline: `normalizePath`, `normalizeShellEvasion`, `stripCommitMessage` |
+| `src/normalizer.zig` | Input normalization pipeline: `normalizePath`, `normalizeShellEvasion` (delegates to `normalizeBasic`, `expandBraces`, `collapseSpaces`), `stripCommitMessage` |
 | `src/path_matcher.zig` | Path-based matching: `basename`, `matchesSecretPattern`, `matchesProcSecret` |
-| `src/shell_analyzer.zig` | Shell segment analysis: `containsPattern(Safe)`, `stripShellPrefix`, `isSafeArgCommand`, `isEnvDump`, `matchesPrefixInChain`, `countChainSegments`. Owns internal tables: `chain_separators`, `safe_arg_commands` |
+| `src/shell_analyzer.zig` | Shell segment analysis: `ChainIterator`, `containsPattern(Safe)`, `stripShellPrefix`, `isSafeArgCommand`, `isEnvDump`, `matchesPrefixInChain`, `countChainSegments`. Owns internal tables: `chain_separators`, `safe_arg_commands` |
 | `src/shell_detector.zig` | Shell execution detection: `hasPipeToShell`, `hasProcessSubstitutionShell`, `isPipLocalInstall`, `containsDnsCommand`. Owns internal table: `pip_local_flags` |
 | `src/evaluator.zig` | Rule evaluation orchestration: `checkBashCommand`, `checkFileAccess`, `evaluate` |
 | `src/main.zig` | Entry point & I/O: `main`, `writeOutput` |
-| `src/tests.zig` | All 344 integration tests |
+| `src/tests.zig` | All 341 integration tests (category-based sections) |
 
 Dependency graph (no cycles):
 ```
@@ -93,10 +93,10 @@ tests        ← evaluator
 | `file_attr_commands` | substring | Bash |
 | `dns_exfil_commands` + `cmd_subst_indicators` | word-boundary + substring AND | Bash (DNS exfiltration) |
 | `container_escape_patterns` | substring | Bash |
-| `docker_dangerous_patterns` | substring | Bash |
+| `docker_context` + `docker_dangerous_patterns` | compound (docker context + flag substring) | Bash |
 | `lib_injection_patterns` | segment-aware (`containsPatternSafe`) | Bash |
 | `cloud_metadata_patterns` | segment-aware (`containsPatternSafe`) | Bash |
-| `ssh_tunnel_flags` | compound (ssh context + flag substring) | Bash |
+| `ssh_context` + `ssh_tunnel_flags` | compound (ssh context + flag substring) | Bash |
 | `prefix_only_commands` | exact/prefix per segment | Bash (chain-aware) |
 | `safe_arg_commands` | prefix match per segment | Bash (FP prevention) |
 | `proc_secret_files` | path-token aware | Read/Edit/Write + Bash |
@@ -106,8 +106,8 @@ tests        ← evaluator
 
 ### Key design decisions
 
-- **Segment-aware matching (`containsPatternSafe`)**: Splits command by `chain_separators` (`&&`, `||`, `;`, `$(`, `` ` ``, `|`, `\n`, `(`, `{`), identifies the first token of each segment, skips pattern matching for `safe_arg_commands` (grep, echo, git log, etc.) to prevent FPs like `grep 'import socket'` triggering reverse shell detection
-- **Shell evasion normalization (`normalizeShellEvasion`)**: Multi-pass: tab→space, `${IFS}`/`$IFS`→space, mid-word quote stripping, brace expansion `{a,b,c}`→`a b c`, backslash-newline removal, consecutive space collapse. Applied before pattern matching to defeat obfuscation
+- **Segment-aware matching (`containsPatternSafe`)**: Uses `ChainIterator` to split command by `chain_separators` (`&&`, `||`, `;`, `$(`, `` ` ``, `|`, `\n`, `(`, `{`), identifies the first token of each segment, skips pattern matching for `safe_arg_commands` (grep, echo, git log, etc.) to prevent FPs like `grep 'import socket'` triggering reverse shell detection. `ChainIterator` is also reused by `isEnvDump`, `matchesPrefixInChain`, and `countChainSegments`
+- **Shell evasion normalization (`normalizeShellEvasion`)**: 3-pass pipeline via `normalizeBasic` → `expandBraces` → `collapseSpaces`, all operating in-place on a single buffer. Pass 1: tab→space, `${IFS}`/`$IFS`→space, quote stripping, backslash-newline removal. Pass 2: brace expansion `{a,b,c}`→`a b c`. Pass 3: consecutive space collapse. Applied before pattern matching to defeat obfuscation
 - **Path normalization (`normalizePath`)**: Collapses `//`, `/./`, `/../` before file path checks to prevent traversal bypasses
 - **Pipe-to-shell detection (`hasPipeToShell`)**: Basename matching of pipe target token, including `env` wrapper detection (`| /usr/bin/env bash`)
 - **Commit message stripping (`stripCommitMessage`)**: Parses quoted/unquoted `-m` messages, preserves chained commands after the message. Applied BEFORE `normalizeShellEvasion` (which strips quotes)
@@ -126,7 +126,7 @@ tests        ← evaluator
 - **SSH tunneling defense**: Compound check requiring `ssh ` context plus tunnel flags (`-R`, `-L`, `-D`)
 - **Git credential theft defense**: Blocks `credential.helper`, `git credential-`, `git credential ` in commands
 - **Heredoc/herestring to shell**: Blocks `bash <<`, `sh <<`, `zsh <<` and no-space variants
-- Tests in `src/tests.zig` cover both attack patterns and false-positive prevention (344 tests)
+- Tests in `src/tests.zig` cover both attack patterns and false-positive prevention (341 tests, organized by category)
 
 ## Development Workflow
 

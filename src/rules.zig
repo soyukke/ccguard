@@ -232,6 +232,10 @@ pub const container_escape_patterns = [_][]const u8{
     "nsenter ",
 };
 
+// Context patterns used for compound checks in evaluator
+pub const docker_context = [_][]const u8{"docker "};
+pub const ssh_context = [_][]const u8{"ssh "};
+
 // Docker-specific dangerous patterns (require "docker" context)
 pub const docker_dangerous_patterns = [_][]const u8{
     "--privileged",

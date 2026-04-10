@@ -105,6 +105,38 @@ fn isSafeArgCommand(segment: []const u8) bool {
     return false;
 }
 
+// --- Chain segment iterator ---
+
+const ChainIterator = struct {
+    remaining: []const u8,
+    separators: []const []const u8,
+
+    fn next(self: *ChainIterator) ?[]const u8 {
+        if (self.remaining.len == 0) return null;
+        var earliest: ?usize = null;
+        var sep_len: usize = 0;
+        for (self.separators) |sep| {
+            if (std.mem.indexOf(u8, self.remaining, sep)) |idx| {
+                if (earliest == null or idx < earliest.?) {
+                    earliest = idx;
+                    sep_len = sep.len;
+                }
+            }
+        }
+        const segment = if (earliest) |idx| self.remaining[0..idx] else self.remaining;
+        if (earliest) |idx| {
+            self.remaining = self.remaining[idx + sep_len ..];
+        } else {
+            self.remaining = self.remaining[self.remaining.len..];
+        }
+        return segment;
+    }
+};
+
+fn chainSegments(command: []const u8) ChainIterator {
+    return .{ .remaining = command, .separators = &chain_separators };
+}
+
 // --- Env dump detection ---
 
 fn isEnvDumpSegment(segment: []const u8) bool {
@@ -150,23 +182,9 @@ fn isEnvDumpSegment(segment: []const u8) bool {
 }
 
 pub fn isEnvDump(command: []const u8) bool {
-    var remaining = command;
-    while (remaining.len > 0) {
-        var earliest: ?usize = null;
-        var sep_len: usize = 0;
-        for (chain_separators) |sep| {
-            if (std.mem.indexOf(u8, remaining, sep)) |idx| {
-                if (earliest == null or idx < earliest.?) {
-                    earliest = idx;
-                    sep_len = sep.len;
-                }
-            }
-        }
-        const segment = if (earliest) |idx| remaining[0..idx] else remaining;
+    var it = chainSegments(command);
+    while (it.next()) |segment| {
         if (isEnvDumpSegment(segment)) return true;
-        if (earliest) |idx| {
-            remaining = remaining[idx + sep_len ..];
-        } else break;
     }
     return false;
 }
@@ -174,74 +192,31 @@ pub fn isEnvDump(command: []const u8) bool {
 // --- Chain-aware matching ---
 
 pub fn matchesPrefixInChain(command: []const u8, patterns: []const []const u8) bool {
-    var remaining = command;
-    while (remaining.len > 0) {
-        var earliest: ?usize = null;
-        var sep_len: usize = 0;
-        for (chain_separators) |sep| {
-            if (std.mem.indexOf(u8, remaining, sep)) |idx| {
-                if (earliest == null or idx < earliest.?) {
-                    earliest = idx;
-                    sep_len = sep.len;
-                }
-            }
-        }
-        const segment = if (earliest) |idx| remaining[0..idx] else remaining;
+    var it = chainSegments(command);
+    while (it.next()) |segment| {
         if (isExactOrPrefixMatch(segment, patterns)) return true;
-        if (earliest) |idx| {
-            remaining = remaining[idx + sep_len ..];
-        } else break;
     }
     return false;
 }
 
 // Count chain segments (for excessive chaining detection)
+// Only count && and || — semicolons excluded because normalizeShellEvasion
+// strips quotes, causing semicolons inside quoted strings to be miscounted
 pub fn countChainSegments(command: []const u8) usize {
-    // Only count && and || — semicolons excluded because normalizeShellEvasion
-    // strips quotes, causing semicolons inside quoted strings to be miscounted
     const major_separators = [_][]const u8{ "&&", "||" };
-    var count: usize = 1;
-    var remaining = command;
-    while (remaining.len > 0) {
-        var earliest: ?usize = null;
-        var sep_len: usize = 0;
-        for (major_separators) |sep| {
-            if (std.mem.indexOf(u8, remaining, sep)) |idx| {
-                if (earliest == null or idx < earliest.?) {
-                    earliest = idx;
-                    sep_len = sep.len;
-                }
-            }
-        }
-        if (earliest) |idx| {
-            count += 1;
-            remaining = remaining[idx + sep_len ..];
-        } else break;
-    }
+    var it = ChainIterator{ .remaining = command, .separators = &major_separators };
+    var count: usize = 0;
+    while (it.next()) |_| count += 1;
     return count;
 }
 
 // Check if a pattern exists in any NON-safe-arg segment of a chained command
 pub fn containsPatternSafe(command: []const u8, patterns: []const []const u8) bool {
-    var remaining = command;
-    while (remaining.len > 0) {
-        var earliest: ?usize = null;
-        var sep_len: usize = 0;
-        for (chain_separators) |sep| {
-            if (std.mem.indexOf(u8, remaining, sep)) |idx| {
-                if (earliest == null or idx < earliest.?) {
-                    earliest = idx;
-                    sep_len = sep.len;
-                }
-            }
-        }
-        const segment = if (earliest) |idx| remaining[0..idx] else remaining;
+    var it = chainSegments(command);
+    while (it.next()) |segment| {
         if (!isSafeArgCommand(segment)) {
             if (containsPattern(segment, patterns)) return true;
         }
-        if (earliest) |idx| {
-            remaining = remaining[idx + sep_len ..];
-        } else break;
     }
     return false;
 }
