@@ -199,6 +199,16 @@ pub const network_commands = [_][]const u8{
     "openssl s_client",
 };
 
+// Encoding commands used for obfuscated exfiltration (issue #18)
+// Used with network_commands in compound check
+pub const encoding_commands = [_][]const u8{
+    "base64 ",
+    "base64|",
+    "xxd ",
+    "xxd|",
+    "openssl base64",
+};
+
 // File upload exfiltration patterns (issue #5)
 // Used with network command context (curl/wget) in compound check
 pub const file_upload_patterns = [_][]const u8{
