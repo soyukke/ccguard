@@ -21,6 +21,71 @@ fn writeOutput(writer: anytype, result: types.RuleResult) !void {
     }
 }
 
+const max_log_size = 1024 * 1024; // 1MB cap
+
+fn logDeny(allocator: std.mem.Allocator, input: types.HookInput, reason: []const u8) void {
+    const home = std.process.getEnvVarOwned(allocator, "HOME") catch return;
+    defer allocator.free(home);
+
+    const log_dir = std.fmt.allocPrint(allocator, "{s}/.local/share/ccguard", .{home}) catch return;
+    defer allocator.free(log_dir);
+
+    std.fs.cwd().makePath(log_dir) catch return;
+
+    const log_path = std.fmt.allocPrint(allocator, "{s}/denied.jsonl", .{log_dir}) catch return;
+    defer allocator.free(log_path);
+
+    // Check file size — rotate if > 1MB
+    if (std.fs.cwd().statFile(log_path)) |stat| {
+        if (stat.size > max_log_size) {
+            // Truncate by deleting (simple rotation)
+            std.fs.cwd().deleteFile(log_path) catch {};
+        }
+    } else |_| {}
+
+    const file = std.fs.cwd().createFile(log_path, .{ .truncate = false }) catch return;
+    defer file.close();
+    file.seekFromEnd(0) catch return;
+
+    const tool = input.tool_name orelse "unknown";
+    const cmd = if (input.tool_input) |ti| (ti.command orelse "") else "";
+    const fp = if (input.tool_input) |ti| (ti.file_path orelse "") else "";
+
+    const writer = file.deprecatedWriter();
+    writer.print("{{\"tool\":\"{s}\",\"command\":\"{s}\",\"file_path\":\"{s}\",\"reason\":\"{s}\"}}\n", .{ tool, cmd, fp, reason }) catch {};
+}
+
+fn runLog(allocator: std.mem.Allocator) !void {
+    const out: std.fs.File = .stdout();
+    const writer = out.deprecatedWriter();
+
+    const home = std.process.getEnvVarOwned(allocator, "HOME") catch {
+        try writer.writeAll("error: HOME not set\n");
+        std.process.exit(1);
+    };
+    defer allocator.free(home);
+
+    const log_path = std.fmt.allocPrint(allocator, "{s}/.local/share/ccguard/denied.jsonl", .{home}) catch unreachable;
+    defer allocator.free(log_path);
+
+    const content = std.fs.cwd().readFileAlloc(allocator, log_path, max_log_size + 1) catch |err| {
+        if (err == error.FileNotFound) {
+            try writer.writeAll("No denied commands logged yet.\n");
+            return;
+        }
+        try writer.writeAll("error: cannot read log file\n");
+        std.process.exit(1);
+    };
+    defer allocator.free(content);
+
+    if (content.len == 0) {
+        try writer.writeAll("No denied commands logged yet.\n");
+        return;
+    }
+
+    try writer.writeAll(content);
+}
+
 fn printUsage(writer: anytype) !void {
     try writer.writeAll(
         \\Usage:
@@ -28,6 +93,7 @@ fn printUsage(writer: anytype) !void {
         \\  ccguard check <command>               Check if a Bash command would be blocked
         \\  ccguard check --tool <T> --file-path <P>  Check file access
         \\  ccguard setup                         Add ccguard hook to ~/.claude/settings.json
+        \\  ccguard log                           Show denied commands log
         \\  ccguard version                       Show version
         \\
     );
@@ -232,6 +298,10 @@ pub fn main() !void {
             try runCheck(args[2..]);
             return;
         }
+        if (std.mem.eql(u8, args[1], "log")) {
+            try runLog(allocator);
+            return;
+        }
         if (std.mem.eql(u8, args[1], "setup")) {
             try runSetup(allocator);
             return;
@@ -269,6 +339,7 @@ pub fn main() !void {
     try writeOutput(out.deprecatedWriter(), result);
 
     if (result.decision == .deny) {
+        logDeny(allocator, parsed.value, result.reason);
         const err_out: std.fs.File = .stderr();
         try err_out.deprecatedWriter().print("ccguard: {s}\n", .{result.reason});
         std.process.exit(2);
