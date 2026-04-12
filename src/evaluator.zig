@@ -56,6 +56,12 @@ fn checkBashCommand(raw_command: []const u8) RuleResult {
         return .{ .decision = .deny, .reason = "sensitive env var exfiltration blocked" };
     }
 
+    // Encoding-based exfiltration — issue #18
+    // Compound: encoding command (base64, xxd) + network command in same chain
+    if (analyzer.containsPattern(command, &rules.encoding_commands) and analyzer.containsPattern(command, &rules.network_commands)) {
+        return .{ .decision = .deny, .reason = "encoding-based exfiltration blocked" };
+    }
+
     // File upload exfiltration — issue #5
     if (analyzer.containsPatternSafe(command, &rules.file_upload_patterns)) {
         return .{ .decision = .deny, .reason = "file upload exfiltration blocked" };
