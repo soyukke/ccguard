@@ -134,6 +134,16 @@ pub const secret_exact_names = [_][]const u8{
     ".netrc",
     ".git-credentials",
     ".htpasswd",
+    // Shell history files (issue #21) — may contain passwords typed on CLI
+    ".bash_history",
+    ".zsh_history",
+    ".node_repl_history",
+    ".python_history",
+    ".psql_history",
+    ".mysql_history",
+    ".rediscli_history",
+    // Claude internal data (issue #21)
+    "history.jsonl",
 };
 
 // Patterns that match as path segments (/.ssh/, /.aws/, etc.)
