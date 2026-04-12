@@ -36,6 +36,12 @@ AI coding assistants can accidentally run destructive commands, read secrets, or
 | **Credential leakage** | `curl` + `AKIA*`, `ghp_*`, `sk-proj-*`, `xoxb-*` | Block API key exfiltration |
 | **Sensitive env var exfiltration** | `curl` + `$OPENAI_API_KEY`, `$AWS_SECRET_ACCESS_KEY` | Block credential exfiltration |
 | **Script sourcing** | `source script.sh`, `. setup.sh` | Block arbitrary script execution |
+| **Git config dangerous keys** | `core.hooksPath`, `core.pager`, `core.editor`, `core.sshCommand` | Block arbitrary code execution via git config |
+| **File upload exfiltration** | `curl -T`, `curl -F`, `curl -d @`, `wget --post-file` | Block file upload to external servers |
+| **Shell script execution** | `bash /tmp/script.sh`, `sh ./evil.sh` | Block download-and-execute attacks |
+| **Redirect to protected paths** | `echo "evil" > ~/.bashrc`, `printf > ~/.ssh/config` | Block redirect-based config writes |
+| **Kernel/system commands** | `insmod`, `modprobe`, `mount`, `sysctl`, `iptables` | Block kernel/network manipulation |
+| **Debug/process attach** | `gdb -p`, `strace -p`, `ltrace -p` | Block process inspection and injection |
 
 ### File access (Read / Edit / Write)
 
@@ -43,9 +49,10 @@ AI coding assistants can accidentally run destructive commands, read secrets, or
 |---|---|---|---|
 | **Secret file access** | Read, Edit, Write | `.env`, `.ssh/`, `.aws/`, `*.pem`, `credentials` | Prevent secret leaks |
 | **/proc sensitive access** | Read, Edit, Write | `/proc/self/environ`, `/proc/*/cmdline` | Block process secret access |
-| **Shell config modification** | Edit, Write only | `.zshrc`, `.bashrc`, `.gitconfig`, `.claude/settings` | Protect shell environment |
-| **IDE/MCP config protection** | Edit, Write only | `.vscode/settings.json`, `.idea/`, `.code-workspace`, `.cursorrules`, `copilot-instructions.md`, `.kiro/` | Prevent agent trust boundary attacks |
-| **System path protection** | Edit, Write only | `/etc/`, `/usr/`, `/System/`, `/Library/LaunchDaemons/` | Protect system files |
+| **Shell config modification** | Edit, Write, NotebookEdit | `.zshrc`, `.bashrc`, `.gitconfig`, `.claude/settings` | Protect shell environment |
+| **IDE/MCP config protection** | Edit, Write, NotebookEdit | `.vscode/settings.json`, `.idea/`, `.code-workspace`, `.cursorrules`, `copilot-instructions.md`, `.kiro/` | Prevent agent trust boundary attacks |
+| **CI/CD pipeline config** | Edit, Write, NotebookEdit | `.github/workflows/`, `.gitlab-ci.yml`, `Jenkinsfile`, `.circleci/`, `terraform.tfstate` | Prevent supply chain attacks via CI/CD |
+| **System path protection** | Edit, Write, NotebookEdit | `/etc/`, `/usr/`, `/System/`, `/Library/LaunchDaemons/` | Protect system files |
 
 ## Install
 
@@ -89,7 +96,7 @@ That's it. Every tool call is now guarded.
 
 ## How it works
 
-1. Claude Code calls a tool (Bash, Read, Edit, Write, etc.)
+1. Claude Code calls a tool (Bash, Read, Edit, Write, NotebookEdit, MCP tools, etc.)
 2. Before execution, the hook sends JSON to ccguard via stdin:
    ```json
    {"tool_name": "Bash", "tool_input": {"command": "rm -rf /"}}
@@ -105,6 +112,9 @@ That's it. Every tool call is now guarded.
 - **Shell evasion normalization** — `${IFS}`→space, tab→space, quote stripping, brace expansion, backslash-newline removal
 - **Commit message stripping** — removes `-m "..."` content before pattern matching
 - **Path normalization** — collapses `//`, `/./`, `/../` to prevent traversal bypass
+- **Symlink resolution** — resolves symlinks via `realpath` before file path checks to prevent TOCTOU bypass
+- **Redirect target extraction** — extracts paths after `>` / `>>` and checks against protected patterns
+- **MCP/unknown tool inspection** — applies Bash and file access checks to unknown tool inputs
 
 ## Test
 
@@ -153,6 +163,8 @@ just bench     # Benchmark all rule categories
   - Validated existing rules against 314 AIShellJack attack payloads covering 70 MITRE ATT&CK techniques.
 - Maloyan, A. (2026). *Prompt Injection Attacks on Agentic Coding Assistants: A Systematic Analysis of Vulnerabilities in Skills, Tools, and Protocol Ecosystems*. arXiv:2601.17548. https://arxiv.org/abs/2601.17548
   - AI IDE instruction file protection (`copilot-instructions.md`, `.cursorrules`) is informed by this analysis.
+- Ji, Z., Li, Z., Jiang, W., Gao, Y., & Wang, S. (2026). *Measuring the Permission Gate: A Stress-Test Evaluation of Claude Code's Auto Mode*. arXiv:2604.04978. https://arxiv.org/abs/2604.04978
+  - CI/CD pipeline config protection and symlink TOCTOU mitigation are motivated by this paper's finding that 36.8% of state-changing actions bypass the classifier via Edit/Write tools.
 
 ## License
 
