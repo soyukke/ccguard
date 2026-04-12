@@ -1,0 +1,16 @@
+{
+  "name": "ccguard",
+  "metadata": {
+    "description": "Security guard for Claude Code with shell-aware pattern matching"
+  },
+  "owner": {
+    "name": "soyukke"
+  },
+  "plugins": [
+    {
+      "name": "ccguard",
+      "source": "./",
+      "description": "Security guard — blocks dangerous commands with shell-aware pattern matching"
+    }
+  ]
+}
