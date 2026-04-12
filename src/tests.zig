@@ -31,4 +31,5 @@ comptime {
     _ = @import("tests/browser_hijack.zig");
     _ = @import("tests/history_files.zig");
     _ = @import("tests/attack_tools.zig");
+    _ = @import("tests/interpreter_exec.zig");
 }

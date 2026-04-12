@@ -504,6 +504,35 @@ pub const custom_registry_patterns = [_][]const u8{
     "--registry=",
 };
 
+// Interpreter one-liner context patterns (issue #17)
+// Used in compound check: interpreter context + dangerous payload
+pub const interpreter_exec_context = [_][]const u8{
+    "python -c ",
+    "python -c'",
+    "python3 -c ",
+    "python3 -c'",
+    "ruby -e ",
+    "ruby -e'",
+    "perl -e ",
+    "perl -e'",
+    "node -e ",
+    "node -e'",
+};
+
+// Dangerous payloads inside interpreter one-liners (issue #17)
+pub const interpreter_dangerous_payloads = [_][]const u8{
+    "os.system",
+    "os.popen",
+    "subprocess",
+    "__import__",
+    "socket",
+    "child_process",
+    "execSync",
+    ".exec(",
+    "system(",
+    "pty.spawn",
+};
+
 // Credential literal patterns — inline API key exfiltration (AC-2)
 // Used with network_commands in compound check
 pub const credential_literal_patterns = [_][]const u8{
