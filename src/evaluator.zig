@@ -56,8 +56,18 @@ fn checkBashCommand(raw_command: []const u8) RuleResult {
         return .{ .decision = .deny, .reason = "sensitive env var exfiltration blocked" };
     }
 
+    // File upload exfiltration — issue #5
+    if (analyzer.containsPatternSafe(command, &rules.file_upload_patterns)) {
+        return .{ .decision = .deny, .reason = "file upload exfiltration blocked" };
+    }
+
     if (analyzer.containsPatternSafe(command, &rules.pipe_shell_patterns) or detector.hasPipeToShell(command) or detector.hasProcessSubstitutionShell(command) or detector.hasOutputProcessSubstitutionShell(command)) {
         return .{ .decision = .deny, .reason = "pipe-to-shell execution blocked" };
+    }
+
+    // Shell script execution: bash /path/to/script.sh (issue #4)
+    if (detector.hasShellScriptExec(command)) {
+        return .{ .decision = .deny, .reason = "shell script execution blocked" };
     }
 
     if (analyzer.containsPatternSafe(command, &rules.global_install_commands) and !detector.isPipLocalInstall(command)) {
@@ -148,8 +158,29 @@ fn checkBashCommand(raw_command: []const u8) RuleResult {
     }
 
     // Bash write to protected files: block shell config references
+    // Uses containsPatternSafe for non-redirect commands (e.g. sed, cp, mv)
     if (analyzer.containsPatternSafe(command, &rules.shell_config_patterns)) {
         return .{ .decision = .deny, .reason = "shell/git config modification blocked" };
+    }
+
+    // Bash write to CI/CD pipeline configs
+    if (analyzer.containsPatternSafe(command, &rules.cicd_config_patterns)) {
+        return .{ .decision = .deny, .reason = "CI/CD pipeline config modification blocked" };
+    }
+
+    // Redirect target checks (issue #2): catch `echo "evil" > ~/.bashrc` etc.
+    // These catch cases where safe_arg_commands (echo/printf) redirect to protected paths.
+    if (detector.hasRedirectToPattern(command, &rules.shell_config_patterns)) {
+        return .{ .decision = .deny, .reason = "redirect to shell/git config blocked" };
+    }
+    if (detector.hasRedirectToPattern(command, &rules.secret_dir_patterns)) {
+        return .{ .decision = .deny, .reason = "redirect to sensitive file blocked" };
+    }
+    if (detector.hasRedirectToPattern(command, &rules.cicd_config_patterns)) {
+        return .{ .decision = .deny, .reason = "redirect to CI/CD config blocked" };
+    }
+    if (detector.hasRedirectToSystemPath(command, &rules.system_path_patterns)) {
+        return .{ .decision = .deny, .reason = "redirect to system path blocked" };
     }
 
     return .{ .decision = .allow, .reason = "" };
@@ -158,7 +189,21 @@ fn checkBashCommand(raw_command: []const u8) RuleResult {
 fn checkFileAccess(raw_file_path: []const u8, tool_name: []const u8) RuleResult {
     // Normalize path to prevent bypass via /./, /../, //
     var path_buf: [65536]u8 = undefined;
-    const file_path = normalizer.normalizePath(&path_buf, raw_file_path);
+    const string_normalized = normalizer.normalizePath(&path_buf, raw_file_path);
+
+    // Opportunistic symlink resolution (issue #13): resolve to real path if file exists.
+    // Falls back to string-normalized path for new files (Write) or permission errors.
+    var real_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const file_path = blk: {
+        if (std.fs.cwd().realpath(string_normalized, &real_buf)) |real| {
+            break :blk real;
+        } else |err| {
+            if (err == error.SymLinkLoop) {
+                return .{ .decision = .deny, .reason = "symlink loop detected" };
+            }
+            break :blk string_normalized;
+        }
+    };
 
     if (path_matcher.matchesSecretPattern(file_path)) {
         return .{ .decision = .deny, .reason = "access to sensitive file blocked" };
@@ -168,9 +213,12 @@ fn checkFileAccess(raw_file_path: []const u8, tool_name: []const u8) RuleResult 
         return .{ .decision = .deny, .reason = "proc secret access blocked" };
     }
     // Only block shell config and system paths for Edit/Write, not Read
-    if (std.mem.eql(u8, tool_name, "Edit") or std.mem.eql(u8, tool_name, "Write")) {
+    if (std.mem.eql(u8, tool_name, "Edit") or std.mem.eql(u8, tool_name, "Write") or std.mem.eql(u8, tool_name, "NotebookEdit")) {
         if (analyzer.containsPattern(file_path, &rules.shell_config_patterns)) {
             return .{ .decision = .deny, .reason = "shell/git config modification blocked" };
+        }
+        if (analyzer.containsPattern(file_path, &rules.cicd_config_patterns)) {
+            return .{ .decision = .deny, .reason = "CI/CD pipeline config modification blocked" };
         }
         for (rules.system_path_patterns) |prefix| {
             if (std.mem.startsWith(u8, file_path, prefix)) {
@@ -191,9 +239,21 @@ pub fn evaluate(input: HookInput) RuleResult {
 
     if (std.mem.eql(u8, tool_name, "Read") or
         std.mem.eql(u8, tool_name, "Edit") or
-        std.mem.eql(u8, tool_name, "Write"))
+        std.mem.eql(u8, tool_name, "Write") or
+        std.mem.eql(u8, tool_name, "NotebookEdit"))
     {
         if (tool_input.file_path) |fp| return checkFileAccess(fp, tool_name);
+    }
+
+    // Unknown tools (including MCP): check command and file_path if present (issue #6)
+    if (tool_input.command) |cmd| {
+        const result = checkBashCommand(cmd);
+        if (result.decision == .deny) return result;
+    }
+    if (tool_input.file_path) |fp| {
+        // Treat unknown tools as write-capable (conservative)
+        const result = checkFileAccess(fp, "Write");
+        if (result.decision == .deny) return result;
     }
 
     return .{ .decision = .allow, .reason = "" };

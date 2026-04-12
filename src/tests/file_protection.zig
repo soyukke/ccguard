@@ -355,8 +355,8 @@ test "allow Read .kiro/settings" {
     try std.testing.expectEqual(.allow, r.decision);
 }
 
-test "allow Write normal .github file" {
-    const r = evaluate(.{ .tool_name = "Write", .tool_input = .{ .file_path = "/home/user/project/.github/workflows/ci.yml" } });
+test "allow Write .github non-workflow file" {
+    const r = evaluate(.{ .tool_name = "Write", .tool_input = .{ .file_path = "/home/user/project/.github/CODEOWNERS" } });
     try std.testing.expectEqual(.allow, r.decision);
 }
 

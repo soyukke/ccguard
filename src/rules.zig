@@ -21,6 +21,11 @@ pub const dangerous_commands = [_][]const u8{
     "credential.helper",
     "git credential-",
     "git credential ",
+    // Git config dangerous keys (issue #3)
+    "core.hooksPath",
+    "core.pager",
+    "core.editor",
+    "core.sshCommand",
     "mkfs",
     "dd if=",
     "> /dev/",
@@ -194,6 +199,23 @@ pub const network_commands = [_][]const u8{
     "openssl s_client",
 };
 
+// File upload exfiltration patterns (issue #5)
+// Used with network command context (curl/wget) in compound check
+pub const file_upload_patterns = [_][]const u8{
+    " -T ",
+    " -T=",
+    "--upload-file ",
+    "--upload-file=",
+    " -F ",
+    " -F=",
+    " -d @",
+    " -d=@",
+    "--data-binary @",
+    "--data-binary=@",
+    "--post-file=",
+    "--post-file ",
+};
+
 // Global package install commands
 pub const global_install_commands = [_][]const u8{
     "pip install ",
@@ -328,6 +350,21 @@ pub const prefix_only_commands = [_][]const u8{
     "coproc",
     // Alias definition — persistence/hijacking attack vector
     "alias ",
+    // Kernel module operations (issue #10)
+    "insmod",
+    "rmmod",
+    "modprobe",
+    // Filesystem mount operations (issue #10)
+    "mount",
+    "umount",
+    // Kernel parameter changes (issue #10)
+    "sysctl",
+    // Firewall / network manipulation (issue #10)
+    "iptables",
+    // Debug / process attach tools (issue #11)
+    "strace",
+    "ltrace",
+    "gdb",
 };
 
 // System paths that should not be edited/written
@@ -377,6 +414,25 @@ pub const shell_config_patterns = [_][]const u8{
 };
 
 // safe_arg_commands moved to shell_analyzer.zig (detection mechanics, not policy)
+
+// CI/CD pipeline and IaC state file protection (issue #12)
+// Blocked for Edit/Write only (not Read) — supply chain attack vector.
+pub const cicd_config_patterns = [_][]const u8{
+    // GitHub Actions
+    "/.github/workflows/",
+    // GitLab CI
+    ".gitlab-ci.yml",
+    // Jenkins
+    "Jenkinsfile",
+    // CircleCI
+    "/.circleci/",
+    // Travis CI
+    ".travis.yml",
+    // Bitbucket Pipelines
+    "bitbucket-pipelines.yml",
+    // Terraform state (contains credentials/sensitive resource IDs)
+    "terraform.tfstate",
+};
 
 pub const env_template_suffixes = [_][]const u8{
     ".example",

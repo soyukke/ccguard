@@ -4,7 +4,7 @@ const std = @import("std");
 
 // --- Internal tables (detection mechanics, not policy rules) ---
 
-const chain_separators = [_][]const u8{ "&&", "||", ";", "$(", "`", "|", "\n", "(", "{" };
+pub const chain_separators = [_][]const u8{ "&&", "||", ";", "$(", "`", "|", "\n", "(", "{" };
 
 // Commands whose arguments are safe (search patterns, display text, etc.)
 // For these commands, only the command name itself matters, not args.
@@ -33,7 +33,7 @@ pub fn containsPattern(haystack: []const u8, patterns: []const []const u8) bool 
 // --- Shell prefix stripping ---
 
 // Strip transparent shell prefixes: "command ", "builtin ", and leading VAR=val assignments
-fn stripShellPrefix(segment: []const u8) []const u8 {
+pub fn stripShellPrefix(segment: []const u8) []const u8 {
     var trimmed = std.mem.trimLeft(u8, segment, " \t\n\r");
     // Strip leading VAR=val assignments (e.g., "X=1 Y=2 eval ...")
     while (trimmed.len > 0) {
