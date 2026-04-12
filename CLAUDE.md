@@ -11,7 +11,7 @@ ccguard is a Claude Code PreToolUse hook guard written in Zig. It reads tool cal
 ```bash
 zig build                          # Debug build
 zig build -Doptimize=ReleaseFast   # Release build
-zig build test                     # Run all tests (341 tests in src/tests.zig)
+zig build test                     # Run all tests (590 tests in src/tests.zig)
 ```
 
 With just (optional):
@@ -33,11 +33,11 @@ just bench     # Benchmark all rule categories
 | `src/rules.zig` | Security policy pattern arrays (pure configuration data, no logic) |
 | `src/normalizer.zig` | Input normalization pipeline: `normalizePath`, `normalizeShellEvasion` (delegates to `normalizeBasic`, `expandBraces`, `collapseSpaces`), `stripCommitMessage` |
 | `src/path_matcher.zig` | Path-based matching: `basename`, `matchesSecretPattern`, `matchesProcSecret` |
-| `src/shell_analyzer.zig` | Shell segment analysis: `ChainIterator`, `containsPattern(Safe)`, `stripShellPrefix`, `isSafeArgCommand`, `isEnvDump`, `matchesPrefixInChain`, `countChainSegments`. Owns internal tables: `chain_separators`, `safe_arg_commands` |
-| `src/shell_detector.zig` | Shell execution detection: `hasPipeToShell`, `hasProcessSubstitutionShell`, `isPipLocalInstall`, `containsDnsCommand`. Owns internal table: `pip_local_flags` |
+| `src/shell_analyzer.zig` | Shell segment analysis: `ChainIterator`, `containsPattern(Safe)`, `stripShellPrefix`, `isSafeArgCommand`, `isEnvDump`, `matchesPrefixInChain`, `countChainSegments`. Exports: `chain_separators`, `safe_arg_commands` |
+| `src/shell_detector.zig` | Shell execution detection: `hasPipeToShell`, `hasProcessSubstitutionShell`, `isPipLocalInstall`, `containsDnsCommand`, `hasShellScriptExec`, `hasRedirectToPattern`, `hasRedirectToSystemPath`. Owns internal table: `pip_local_flags` |
 | `src/evaluator.zig` | Rule evaluation orchestration: `checkBashCommand`, `checkFileAccess`, `evaluate` |
 | `src/main.zig` | Entry point & I/O: `main`, `writeOutput` |
-| `src/tests.zig` | All 341 integration tests (category-based sections) |
+| `src/tests.zig` | All 590 integration tests (category-based sections) |
 
 Dependency graph (no cycles):
 ```
@@ -45,8 +45,8 @@ types        (standalone)
 rules        (standalone — policy patterns only)
 normalizer   (standalone)
 path_matcher ← rules
-shell_analyzer (standalone — owns detection-mechanics tables)
-shell_detector ← rules, path_matcher
+shell_analyzer (standalone — exports chain_separators, stripShellPrefix)
+shell_detector ← rules, path_matcher, shell_analyzer
 evaluator    ← types, rules, normalizer, path_matcher, shell_analyzer, shell_detector
 main         ← types, evaluator
 tests        ← evaluator
@@ -58,8 +58,8 @@ tests        ← evaluator
 2. **evaluate()** (`evaluator.zig`) dispatches by `tool_name`:
    - `Bash` → `checkBashCommand()` with normalization pipeline + pattern matching
    - `Read` → `checkFileAccess()` against secret file patterns only
-   - `Edit`/`Write` → `checkFileAccess()` against secret files, shell config, and system paths
-   - Unknown tools → allow
+   - `Edit`/`Write`/`NotebookEdit` → `checkFileAccess()` against secret files, shell config, CI/CD config, and system paths
+   - Unknown tools (including MCP) → `checkBashCommand()` on `command` field + `checkFileAccess()` on `file_path` field (if present)
 3. **writeOutput()** (`main.zig`) emits PreToolUse hook JSON response with allow/deny decision
 
 ### checkBashCommand Normalization Pipeline (`normalizer.zig` → `shell_analyzer.zig`)
@@ -69,15 +69,19 @@ tests        ← evaluator
 3. `normalizeShellEvasion()` — tab→space, `${IFS}`/`$IFS`→space, quote stripping, brace expansion, backslash-newline removal, space collapse
 4. `containsPatternSafe()` for dangerous_commands, reverse_shell, pipe_shell (skips safe-arg segments)
 5. `containsPattern()` for network+secret exfiltration (intentionally not safe-arg aware)
-6. `hasPipeToShell()` — dynamic pipe-to-shell detection with basename matching
-7. Other checks: global_install, history_evasion, file_attr, prefix_only, env_dump, dns_exfil, container_escape, docker, proc_secret
+6. `containsPatternSafe()` for file_upload_patterns (curl -T, -F, -d @, wget --post-file)
+7. `hasPipeToShell()` — dynamic pipe-to-shell detection with basename matching
+8. `hasShellScriptExec()` — detect `bash /path/to/script.sh` (allows `bash -c '...'`)
+9. Other checks: global_install, history_evasion, file_attr, prefix_only, env_dump, dns_exfil, container_escape, docker, proc_secret
+10. `hasRedirectToPattern()` — extract redirect target paths and check against shell_config, secret_dir, cicd_config, system_path patterns
 
 ### checkFileAccess Flow
 
 1. `normalizePath()` — collapse `//`, `/./`, `/../`
-2. `matchesSecretPattern()` — basename-aware secret file detection
-3. `matchesProcSecret()` — `/proc/*/environ`, `/proc/*/cmdline`
-4. Edit/Write only: `shell_config_patterns`, `system_path_patterns`
+2. `realpath()` — opportunistic symlink resolution (falls back to string-normalized path for new files)
+3. `matchesSecretPattern()` — basename-aware secret file detection
+4. `matchesProcSecret()` — `/proc/*/environ`, `/proc/*/cmdline`
+5. Edit/Write/NotebookEdit only: `shell_config_patterns`, `cicd_config_patterns`, `system_path_patterns`
 
 ### Rule Categories (pattern arrays in `rules.zig`)
 
@@ -101,8 +105,10 @@ tests        ← evaluator
 | `safe_arg_commands` | prefix match per segment | Bash (FP prevention) |
 | `proc_secret_files` | path-token aware | Read/Edit/Write + Bash |
 | `secret_exact_names/dir/file/extensions` | basename-aware | Read/Edit/Write |
-| `shell_config_patterns` | substring | Edit/Write only |
-| `system_path_patterns` | startsWith | Edit/Write only |
+| `file_upload_patterns` | segment-aware (`containsPatternSafe`) | Bash (exfiltration) |
+| `shell_config_patterns` | substring | Edit/Write/NotebookEdit only |
+| `cicd_config_patterns` | substring | Edit/Write/NotebookEdit only |
+| `system_path_patterns` | startsWith | Edit/Write/NotebookEdit only |
 
 ### Key design decisions
 
@@ -126,7 +132,17 @@ tests        ← evaluator
 - **SSH tunneling defense**: Compound check requiring `ssh ` context plus tunnel flags (`-R`, `-L`, `-D`)
 - **Git credential theft defense**: Blocks `credential.helper`, `git credential-`, `git credential ` in commands
 - **Heredoc/herestring to shell**: Blocks `bash <<`, `sh <<`, `zsh <<` and no-space variants
-- Tests in `src/tests.zig` cover both attack patterns and false-positive prevention (341 tests, organized by category)
+- **Redirect target extraction (`hasRedirectToPattern`)**: Scans for `>` / `>>` operators, extracts the target path token, and checks against shell_config, secret_dir, cicd_config, and system_path patterns. Also matches relative paths (pattern `/.foo` matches target `.foo`). Solves the safe_arg bypass where `echo "evil" > ~/.bashrc` was undetected because echo skips containsPatternSafe
+- **Shell script execution detection (`hasShellScriptExec`)**: Uses ChainIterator to check each segment for shell binary + file path patterns (e.g., `bash /tmp/script.sh`). Allows `bash -c '...'` and `bash --version` by checking if the argument starts with `-`
+- **File upload exfiltration defense**: Blocks `curl -T`, `curl -F`, `curl -d @`, `curl --upload-file`, `wget --post-file` patterns (segment-aware). Also mitigates variable indirection (`curl -F @$VAR`)
+- **Symlink TOCTOU mitigation**: `checkFileAccess` calls `realpath()` before pattern checks. Falls back to string-normalized path if file doesn't exist (new Write). `SymLinkLoop` errors result in immediate deny
+- **CI/CD pipeline config protection**: `cicd_config_patterns` blocks Edit/Write to `.github/workflows/`, `.gitlab-ci.yml`, `Jenkinsfile`, `.circleci/`, `.travis.yml`, `bitbucket-pipelines.yml`, `terraform.tfstate`. Motivated by arXiv:2604.04978 finding that 36.8% of state-changing actions bypass classifiers via Edit/Write
+- **MCP/unknown tool inspection**: Unknown tool names have their `command` field checked via `checkBashCommand` and `file_path` field checked via `checkFileAccess` (treated as Write for conservative protection)
+- **NotebookEdit tool**: Treated as Edit/Write equivalent for file access checks
+- **Git config dangerous keys**: Blocks `core.hooksPath`, `core.pager`, `core.editor`, `core.sshCommand` (CVE-2025-65964)
+- **Kernel/system commands**: `insmod`, `rmmod`, `modprobe`, `mount`, `umount`, `sysctl`, `iptables` in prefix_only_commands
+- **Debug tool defense**: `gdb`, `strace`, `ltrace` in prefix_only_commands to prevent process inspection/injection
+- Tests in `src/tests.zig` cover both attack patterns and false-positive prevention (590 tests, organized by category)
 
 ## Development Workflow
 
