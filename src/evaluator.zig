@@ -56,7 +56,7 @@ fn checkBashCommand(raw_command: []const u8) RuleResult {
         return .{ .decision = .deny, .reason = "sensitive env var exfiltration blocked" };
     }
 
-    if (analyzer.containsPatternSafe(command, &rules.pipe_shell_patterns) or detector.hasPipeToShell(command) or detector.hasProcessSubstitutionShell(command)) {
+    if (analyzer.containsPatternSafe(command, &rules.pipe_shell_patterns) or detector.hasPipeToShell(command) or detector.hasProcessSubstitutionShell(command) or detector.hasOutputProcessSubstitutionShell(command)) {
         return .{ .decision = .deny, .reason = "pipe-to-shell execution blocked" };
     }
 
@@ -79,6 +79,31 @@ fn checkBashCommand(raw_command: []const u8) RuleResult {
 
     if (analyzer.matchesPrefixInChain(command, &rules.prefix_only_commands)) {
         return .{ .decision = .deny, .reason = "dangerous shell builtin blocked" };
+    }
+
+    // sed 's/X/Y/e' execute modifier (Flatt Security CVE defense)
+    if (detector.hasSedExecFlag(command)) {
+        return .{ .decision = .deny, .reason = "sed execute modifier blocked" };
+    }
+
+    // xargs shell execution (Flatt Security CVE defense)
+    if (detector.hasXargsShell(command)) {
+        return .{ .decision = .deny, .reason = "xargs shell execution blocked" };
+    }
+
+    // Command options that execute arbitrary programs (Flatt Security CVE defenses)
+    if (analyzer.containsPatternSafe(command, &rules.command_exec_options)) {
+        return .{ .decision = .deny, .reason = "dangerous command execution option blocked" };
+    }
+
+    // man --html/--browser command execution
+    if (analyzer.containsPatternSafe(command, &rules.man_context) and analyzer.containsPatternSafe(command, &rules.man_dangerous_options)) {
+        return .{ .decision = .deny, .reason = "dangerous man option blocked" };
+    }
+
+    // git --upload-pack abbreviated argument attack
+    if (analyzer.containsPatternSafe(command, &rules.git_remote_context) and analyzer.containsPatternSafe(command, &rules.git_upload_pack_patterns)) {
+        return .{ .decision = .deny, .reason = "dangerous git remote option blocked" };
     }
 
     if (detector.containsDnsCommand(command) and analyzer.containsPattern(command, &rules.cmd_subst_indicators)) {
