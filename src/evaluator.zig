@@ -69,7 +69,8 @@ fn checkBashCommand(raw_command: []const u8) RuleResult {
 
     // Interpreter one-liner execution — issue #17
     // Compound: interpreter exec context (python -c, ruby -e, etc.) + dangerous payload
-    if (analyzer.containsPatternSafe(command, &rules.interpreter_exec_context) and analyzer.containsPattern(command, &rules.interpreter_dangerous_payloads)) {
+    // Both patterns must appear in the SAME segment to avoid cross-segment FPs (issue #41)
+    if (analyzer.containsCompoundInSegment(command, &rules.interpreter_exec_context, &rules.interpreter_dangerous_payloads)) {
         return .{ .decision = .deny, .reason = "dangerous interpreter one-liner blocked" };
     }
 
