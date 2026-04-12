@@ -36,7 +36,45 @@ fn isShellSeparator(c: u8) bool {
     return std.ascii.isWhitespace(c) or c == ';' or c == '|' or c == '&' or c == '(' or c == ')' or c == '{' or c == '}' or c == '<' or c == '>';
 }
 
-// Pass 1: Tabs → space, ${IFS}/$IFS → space, quote stripping, backslash-newline removal
+// Sentinel byte for shell metacharacters that were inside quotes.
+// Prevents false chain splits and redirect detection while preserving text for pattern matching.
+const quote_sentinel: u8 = '\x01';
+
+// Shell structural operators that are literal inside single quotes (everything is literal).
+fn isSingleQuoteMetachar(c: u8) bool {
+    return c == '&' or c == '|' or c == ';' or c == '>' or c == '<' or
+        c == '\n' or c == '(' or c == ')' or c == '{' or c == '}' or c == '`';
+}
+
+// Shell structural operators that are literal inside double quotes.
+// $, `, \, ! remain active inside double quotes — do NOT replace.
+fn isDoubleQuoteMetachar(c: u8) bool {
+    return c == '&' or c == '|' or c == ';' or c == '>' or c == '<' or c == '\n';
+}
+
+// Check if the quote at position `pos` follows a code-execution flag (-c or -e),
+// meaning the quoted content is executable code and metacharacters should be preserved.
+// Matches: bash -c '...', python -c '...', ruby -e '...', node -e '...',
+//          perl -e '...', osascript -e '...'
+fn isCodeExecArg(input: []const u8, pos: usize) bool {
+    var j = pos;
+    // Skip spaces between flag and quote
+    while (j > 0 and input[j - 1] == ' ') j -= 1;
+    // Check for "-c" or "-e"
+    if (j >= 2 and input[j - 2] == '-' and (input[j - 1] == 'c' or input[j - 1] == 'e')) {
+        // Must be preceded by a word boundary (space, tab, or start of string)
+        if (j == 2 or input[j - 3] == ' ' or input[j - 3] == '\t') {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Pass 1: Tabs → space, ${IFS}/$IFS → space, quote stripping, backslash-newline removal.
+// Quote-aware: replaces shell metacharacters inside quotes with a sentinel byte
+// to prevent false chain splits and redirect detection (issue #40).
+// Exception: quotes that are arguments to code-execution flags (-c, -e) are NOT
+// modified, since their content is executable code.
 fn normalizeBasic(buf: []u8, input: []const u8) usize {
     var out: usize = 0;
     var i: usize = 0;
@@ -60,10 +98,11 @@ fn normalizeBasic(buf: []u8, input: []const u8) usize {
             i += 4;
         } else if (input[i] == '\'') {
             if (std.mem.indexOfPos(u8, input, i + 1, "'")) |close| {
+                const is_code = isCodeExecArg(input, i);
                 const content = input[i + 1 .. close];
                 for (content) |c| {
                     if (out < buf.len) {
-                        buf[out] = c;
+                        buf[out] = if (!is_code and isSingleQuoteMetachar(c)) quote_sentinel else c;
                         out += 1;
                     }
                 }
@@ -75,10 +114,11 @@ fn normalizeBasic(buf: []u8, input: []const u8) usize {
             }
         } else if (input[i] == '"') {
             if (std.mem.indexOfPos(u8, input, i + 1, "\"")) |close| {
+                const is_code = isCodeExecArg(input, i);
                 const content = input[i + 1 .. close];
                 for (content) |c| {
                     if (out < buf.len) {
-                        buf[out] = c;
+                        buf[out] = if (!is_code and isDoubleQuoteMetachar(c)) quote_sentinel else c;
                         out += 1;
                     }
                 }

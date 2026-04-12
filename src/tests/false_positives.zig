@@ -127,3 +127,63 @@ test "allow grep ssh tunnel flags in docs" {
     const r = evaluate(.{ .tool_name = "Bash", .tool_input = .{ .command = "grep 'ssh -L 8080' README.md" } });
     try std.testing.expectEqual(.allow, r.decision);
 }
+
+// --- Quote-aware normalization (issue #40) ---
+// Quoted text containing shell metacharacters should not create false chain splits or redirects.
+
+test "allow echo with double-quoted chain operator" {
+    // "&&" inside double quotes is literal text, not a chain operator
+    const r = evaluate(.{ .tool_name = "Bash", .tool_input = .{ .command = "echo \"hello && world\"" } });
+    try std.testing.expectEqual(.allow, r.decision);
+}
+
+test "allow echo with single-quoted chain operator" {
+    // '&&' inside single quotes is literal text
+    const r = evaluate(.{ .tool_name = "Bash", .tool_input = .{ .command = "echo 'hello && world'" } });
+    try std.testing.expectEqual(.allow, r.decision);
+}
+
+test "allow echo with double-quoted redirect" {
+    // ">" inside double quotes is literal text, not a redirect
+    const r = evaluate(.{ .tool_name = "Bash", .tool_input = .{ .command = "echo \"output > .bashrc\"" } });
+    try std.testing.expectEqual(.allow, r.decision);
+}
+
+test "allow echo with single-quoted redirect" {
+    const r = evaluate(.{ .tool_name = "Bash", .tool_input = .{ .command = "echo 'output > .bashrc'" } });
+    try std.testing.expectEqual(.allow, r.decision);
+}
+
+test "allow echo with quoted semicolon" {
+    const r = evaluate(.{ .tool_name = "Bash", .tool_input = .{ .command = "echo \"step1; step2; done\"" } });
+    try std.testing.expectEqual(.allow, r.decision);
+}
+
+test "allow echo with quoted pipe" {
+    const r = evaluate(.{ .tool_name = "Bash", .tool_input = .{ .command = "echo \"data | process\"" } });
+    try std.testing.expectEqual(.allow, r.decision);
+}
+
+test "block real chain after quoted text" {
+    // Real && outside quotes must still be detected
+    const r = evaluate(.{ .tool_name = "Bash", .tool_input = .{ .command = "echo \"safe\" && sudo reboot" } });
+    try std.testing.expectEqual(.deny, r.decision);
+}
+
+test "block real redirect outside quotes" {
+    // Real > outside quotes must still be detected
+    const r = evaluate(.{ .tool_name = "Bash", .tool_input = .{ .command = "echo \"safe\" > .bashrc" } });
+    try std.testing.expectEqual(.deny, r.decision);
+}
+
+test "block command substitution inside double quotes" {
+    // $() inside double quotes IS executed — must still be caught
+    const r = evaluate(.{ .tool_name = "Bash", .tool_input = .{ .command = "echo \"$(sudo reboot)\"" } });
+    try std.testing.expectEqual(.deny, r.decision);
+}
+
+test "allow command substitution literal in single quotes" {
+    // $() inside single quotes is literal text — not executed
+    const r = evaluate(.{ .tool_name = "Bash", .tool_input = .{ .command = "echo '$(sudo reboot)'" } });
+    try std.testing.expectEqual(.allow, r.decision);
+}
