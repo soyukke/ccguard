@@ -375,6 +375,13 @@ pub const prefix_only_commands = [_][]const u8{
     "strace",
     "ltrace",
     "gdb",
+    // Clipboard access (issue #19) — AI agents should not read/write clipboard
+    "pbpaste",
+    "pbcopy",
+    "xclip",
+    "xsel",
+    "wl-paste",
+    "wl-copy",
 };
 
 // System paths that should not be edited/written

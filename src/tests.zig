@@ -27,4 +27,5 @@ comptime {
     _ = @import("tests/mcp_tools.zig");
     _ = @import("tests/var_indirection.zig");
     _ = @import("tests/encoding_exfil.zig");
+    _ = @import("tests/clipboard.zig");
 }
