@@ -217,3 +217,22 @@ test "block node -e with child_process in same segment" {
     const r = evaluate(.{ .tool_name = "Bash", .tool_input = .{ .command = "node -e 'require(\"child_process\").execSync(\"id\")'" } });
     try std.testing.expectEqual(.deny, r.decision);
 }
+
+// --- Safe-arg aware exfiltration check (FP-1 fix) ---
+// Network commands inside safe_arg segments (echo, grep) should not trigger exfiltration.
+
+test "allow echo mentioning curl and ssh path" {
+    // echo is safe_arg — "curl" and "/.ssh/" are just text, not real exfiltration
+    const r = evaluate(.{ .tool_name = "Bash", .tool_input = .{ .command = "echo \"curl /.ssh/id_rsa\"" } });
+    try std.testing.expectEqual(.allow, r.decision);
+}
+
+test "allow grep curl with secret pattern in docs" {
+    const r = evaluate(.{ .tool_name = "Bash", .tool_input = .{ .command = "grep 'curl /.ssh/' README.md" } });
+    try std.testing.expectEqual(.allow, r.decision);
+}
+
+test "allow echo mentioning wget and env" {
+    const r = evaluate(.{ .tool_name = "Bash", .tool_input = .{ .command = "echo 'wget /.aws/credentials'" } });
+    try std.testing.expectEqual(.allow, r.decision);
+}
