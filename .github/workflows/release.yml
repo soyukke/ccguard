@@ -8,7 +8,22 @@ permissions:
   contents: write
 
 jobs:
+  version-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify tag matches build.zig.zon version
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          zon=$(grep '\.version = ' build.zig.zon | head -1 | sed 's/.*"\(.*\)".*/\1/')
+          echo "tag: $tag, build.zig.zon: $zon"
+          if [ "$tag" != "$zon" ]; then
+            echo "::error::Tag v${tag} does not match build.zig.zon version ${zon}"
+            exit 1
+          fi
+
   test:
+    needs: version-check
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest]
