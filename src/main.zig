@@ -27,9 +27,144 @@ fn printUsage(writer: anytype) !void {
         \\  ccguard                              Read hook JSON from stdin (default)
         \\  ccguard check <command>               Check if a Bash command would be blocked
         \\  ccguard check --tool <T> --file-path <P>  Check file access
+        \\  ccguard setup                         Add ccguard hook to ~/.claude/settings.json
         \\  ccguard version                       Show version
         \\
     );
+}
+
+const hook_json =
+    \\{
+    \\  "matcher": "",
+    \\  "hooks": [
+    \\    {
+    \\      "type": "command",
+    \\      "command": "ccguard"
+    \\    }
+    \\  ]
+    \\}
+;
+
+fn runSetup(allocator: std.mem.Allocator) !void {
+    const out: std.fs.File = .stdout();
+    const writer = out.deprecatedWriter();
+
+    // Resolve ~/.claude/settings.json
+    const home = std.process.getEnvVarOwned(allocator, "HOME") catch {
+        try writer.writeAll("error: HOME not set\n");
+        std.process.exit(1);
+    };
+    defer allocator.free(home);
+
+    const claude_dir = try std.fmt.allocPrint(allocator, "{s}/.claude", .{home});
+    defer allocator.free(claude_dir);
+
+    const settings_path = try std.fmt.allocPrint(allocator, "{s}/settings.json", .{claude_dir});
+    defer allocator.free(settings_path);
+
+    // Ensure ~/.claude/ directory exists
+    std.fs.cwd().makePath(claude_dir) catch {};
+
+    // Read existing settings or start fresh
+    const content = std.fs.cwd().readFileAlloc(allocator, settings_path, 1024 * 64) catch |err| blk: {
+        if (err == error.FileNotFound) {
+            break :blk null;
+        }
+        try writer.print("error: cannot read {s}\n", .{settings_path});
+        std.process.exit(1);
+    };
+    defer if (content) |c| allocator.free(c);
+
+    // Check if already configured
+    if (content) |c| {
+        if (std.mem.indexOf(u8, c, "\"command\": \"ccguard\"") != null or
+            std.mem.indexOf(u8, c, "\"command\":\"ccguard\"") != null)
+        {
+            try writer.writeAll("ccguard hook is already configured.\n");
+            return;
+        }
+    }
+
+    // Build new settings content
+    var result = std.ArrayListUnmanaged(u8){};
+    defer result.deinit(allocator);
+
+    if (content) |c| {
+        // Find insertion point: look for "hooks" key or add before last '}'
+        if (std.mem.indexOf(u8, c, "\"PreToolUse\"")) |_| {
+            // PreToolUse already exists — find the array and append
+            if (std.mem.indexOf(u8, c, "\"PreToolUse\": [")) |pt_idx| {
+                const insert_pos = pt_idx + "\"PreToolUse\": [".len;
+                try result.appendSlice(allocator,c[0..insert_pos]);
+                try result.appendSlice(allocator,"\n      ");
+                try result.appendSlice(allocator,hook_json);
+                try result.appendSlice(allocator,",");
+                try result.appendSlice(allocator,c[insert_pos..]);
+            } else {
+                // Unexpected format, bail out
+                try writer.writeAll("error: unexpected PreToolUse format, please add manually\n");
+                std.process.exit(1);
+            }
+        } else if (std.mem.indexOf(u8, c, "\"hooks\"")) |_| {
+            // hooks exists but no PreToolUse — add it
+            if (std.mem.indexOf(u8, c, "\"hooks\": {")) |h_idx| {
+                const insert_pos = h_idx + "\"hooks\": {".len;
+                try result.appendSlice(allocator,c[0..insert_pos]);
+                try result.appendSlice(allocator,"\n    \"PreToolUse\": [\n      ");
+                try result.appendSlice(allocator,hook_json);
+                try result.appendSlice(allocator,"\n    ],");
+                try result.appendSlice(allocator,c[insert_pos..]);
+            } else {
+                try writer.writeAll("error: unexpected hooks format, please add manually\n");
+                std.process.exit(1);
+            }
+        } else {
+            // No hooks at all — add before last '}'
+            if (std.mem.lastIndexOfScalar(u8, c, '}')) |last_brace| {
+                try result.appendSlice(allocator,c[0..last_brace]);
+                try result.appendSlice(allocator,
+                    \\,
+                    \\  "hooks": {
+                    \\    "PreToolUse": [
+                    \\
+                );
+                try result.appendSlice(allocator,hook_json);
+                try result.appendSlice(allocator,
+                    \\
+                    \\    ]
+                    \\  }
+                    \\}
+                    \\
+                );
+            } else {
+                try writer.writeAll("error: malformed settings.json\n");
+                std.process.exit(1);
+            }
+        }
+    } else {
+        // No settings file — create from scratch
+        try result.appendSlice(allocator,
+            \\{
+            \\  "hooks": {
+            \\    "PreToolUse": [
+            \\
+        );
+        try result.appendSlice(allocator,hook_json);
+        try result.appendSlice(allocator,
+            \\
+            \\    ]
+            \\  }
+            \\}
+            \\
+        );
+    }
+
+    // Write result
+    const file = try std.fs.cwd().createFile(settings_path, .{});
+    defer file.close();
+    try file.writeAll(result.items);
+
+    try writer.print("ccguard hook added to {s}\n", .{settings_path});
 }
 
 fn runCheck(args: []const [:0]const u8) !void {
@@ -95,6 +230,10 @@ pub fn main() !void {
     if (args.len >= 2) {
         if (std.mem.eql(u8, args[1], "check")) {
             try runCheck(args[2..]);
+            return;
+        }
+        if (std.mem.eql(u8, args[1], "setup")) {
+            try runSetup(allocator);
             return;
         }
         if (std.mem.eql(u8, args[1], "version")) {
