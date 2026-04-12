@@ -56,6 +56,17 @@ AI coding assistants can accidentally run destructive commands, read secrets, or
 
 ## Install
 
+### Plugin Marketplace (recommended)
+
+Run in Claude Code:
+
+```
+/plugin marketplace add soyukke/ccguard
+/plugin install ccguard@ccguard
+```
+
+That's it. The binary is downloaded automatically on session start. No build tools, no JSON editing.
+
 ### Build from source
 
 ```bash
@@ -65,14 +76,7 @@ zig build -Doptimize=ReleaseFast
 cp zig-out/bin/ccguard ~/.local/bin/
 ```
 
-### Requirements
-
-- Zig 0.15.2+
-- `~/.local/bin` in your `$PATH`
-
-## Setup
-
-Add to `~/.claude/settings.json`:
+Then add to `~/.claude/settings.json`:
 
 ```json
 {
@@ -92,7 +96,10 @@ Add to `~/.claude/settings.json`:
 }
 ```
 
-That's it. Every tool call is now guarded.
+#### Requirements (source build only)
+
+- Zig 0.15.2+
+- `~/.local/bin` in your `$PATH`
 
 ## How it works
 
