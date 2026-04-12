@@ -56,11 +56,18 @@ fn stripShellPrefix(segment: []const u8) []const u8 {
         }
         break;
     }
-    // Strip command/builtin prefix
-    const transparent = [_][]const u8{ "command ", "builtin " };
-    for (transparent) |prefix| {
-        if (std.mem.startsWith(u8, trimmed, prefix)) {
-            return std.mem.trimLeft(u8, trimmed[prefix.len..], " \t");
+    // Strip transparent wrapper prefixes (command/builtin/nohup/time/watch)
+    // Loop to handle multiple levels: e.g. "nohup command eval ..." → "eval ..."
+    const transparent = [_][]const u8{ "command ", "builtin ", "nohup ", "time ", "watch " };
+    var changed = true;
+    while (changed) {
+        changed = false;
+        for (transparent) |prefix| {
+            if (std.mem.startsWith(u8, trimmed, prefix)) {
+                trimmed = std.mem.trimLeft(u8, trimmed[prefix.len..], " \t");
+                changed = true;
+                break;
+            }
         }
     }
     return trimmed;
@@ -107,11 +114,11 @@ fn isSafeArgCommand(segment: []const u8) bool {
 
 // --- Chain segment iterator ---
 
-const ChainIterator = struct {
+pub const ChainIterator = struct {
     remaining: []const u8,
     separators: []const []const u8,
 
-    fn next(self: *ChainIterator) ?[]const u8 {
+    pub fn next(self: *ChainIterator) ?[]const u8 {
         if (self.remaining.len == 0) return null;
         var earliest: ?usize = null;
         var sep_len: usize = 0;
@@ -133,7 +140,7 @@ const ChainIterator = struct {
     }
 };
 
-fn chainSegments(command: []const u8) ChainIterator {
+pub fn chainSegments(command: []const u8) ChainIterator {
     return .{ .remaining = command, .separators = &chain_separators };
 }
 

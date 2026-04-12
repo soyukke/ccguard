@@ -1,8 +1,10 @@
-// Shell execution detection — pipe-to-shell, process substitution, pip install, DNS exfiltration.
+// Shell execution detection — pipe-to-shell, process substitution, pip install, DNS exfiltration,
+// sed execute modifier, xargs shell execution.
 
 const std = @import("std");
 const rules = @import("rules.zig");
 const path_matcher = @import("path_matcher.zig");
+const analyzer = @import("shell_analyzer.zig");
 
 // --- Internal table (detection mechanics, not policy rule) ---
 
@@ -97,6 +99,31 @@ pub fn hasProcessSubstitutionShell(command: []const u8) bool {
     return false;
 }
 
+// --- Output process substitution detection ---
+
+// Detect >(shell) patterns: tee >(bash), cmd >(sh -c 'evil'), etc.
+// Unlike <() where the shell is BEFORE the substitution (bash <(...)),
+// for >() the shell is INSIDE the substitution (>(bash ...)).
+pub fn hasOutputProcessSubstitutionShell(command: []const u8) bool {
+    const shell_names = rules.shell_names;
+    var i: usize = 0;
+    while (std.mem.indexOfPos(u8, command, i, ">(")) |idx| {
+        const after = command[idx + 2 ..];
+        // Extract first token inside >(...)
+        const trimmed = std.mem.trimLeft(u8, after, " \t");
+        const token_end = std.mem.indexOfAny(u8, trimmed, " \t)") orelse trimmed.len;
+        if (token_end > 0) {
+            const token = trimmed[0..token_end];
+            const base = path_matcher.basename(token);
+            for (shell_names) |shell| {
+                if (std.mem.eql(u8, base, shell)) return true;
+            }
+        }
+        i = idx + 2;
+    }
+    return false;
+}
+
 // --- Pip install detection ---
 
 pub fn isPipLocalInstall(command: []const u8) bool {
@@ -151,6 +178,120 @@ fn isLocalOnlyArgs(args: []const u8) bool {
         }
     }
     return has_local_flag;
+}
+
+// --- sed execute modifier detection ---
+
+// Detect sed 's/X/Y/e' where /e executes the replacement as a shell command.
+// After normalization, quotes are stripped so we see: sed s/X/Y/e
+// We scan the full command directly (not via chainSegments) because sed's alternate
+// delimiter can be '|' which would be split as a pipe by the chain iterator.
+pub fn hasSedExecFlag(command: []const u8) bool {
+    var offset: usize = 0;
+    while (offset < command.len) {
+        if (std.mem.indexOfPos(u8, command, offset, "sed ")) |idx| {
+            // Word boundary check: must be at start or preceded by non-alnum
+            const before_ok = idx == 0 or !std.ascii.isAlphanumeric(command[idx - 1]);
+            if (before_ok) {
+                if (scanSedSubstitutionE(command[idx + 4 ..])) return true;
+            }
+            offset = idx + 4;
+        } else break;
+    }
+    return false;
+}
+
+// Scan sed arguments for a substitution command with the 'e' flag.
+// After normalization: sed s/X/Y/e, sed -e s/X/Y/e, sed s|X|Y|ge
+fn scanSedSubstitutionE(args: []const u8) bool {
+    var i: usize = 0;
+    while (i < args.len) {
+        // Skip whitespace
+        while (i < args.len and (args[i] == ' ' or args[i] == '\t')) i += 1;
+        if (i >= args.len) break;
+
+        // Stop at chain separators (but NOT | — it could be sed delimiter)
+        if (args[i] == '&' or args[i] == ';') break;
+
+        // Look for 's' followed by a non-alphanumeric, non-space delimiter
+        if (args[i] == 's' and i + 1 < args.len and !std.ascii.isAlphanumeric(args[i + 1]) and args[i + 1] != ' ' and args[i + 1] != '\t') {
+            const delim = args[i + 1];
+            // Count 3 occurrences of delimiter: s<d>pattern<d>replacement<d>flags
+            var pos = i + 2;
+            var delim_count: usize = 1; // first delimiter already found
+            while (pos < args.len and delim_count < 3) {
+                if (args[pos] == '\\' and pos + 1 < args.len) {
+                    pos += 2; // skip escaped char
+                    continue;
+                }
+                if (args[pos] == delim) delim_count += 1;
+                pos += 1;
+            }
+            if (delim_count == 3) {
+                // pos is now right after the 3rd delimiter; scan flags
+                while (pos < args.len and args[pos] != ' ' and args[pos] != '\t' and args[pos] != ';' and args[pos] != '&') {
+                    if (args[pos] == 'e') return true;
+                    pos += 1;
+                }
+            }
+        }
+        // Skip to next whitespace-separated token
+        while (i < args.len and args[i] != ' ' and args[i] != '\t') i += 1;
+    }
+    return false;
+}
+
+// --- xargs shell execution detection ---
+
+// Detect xargs piping to a shell binary: xargs bash, xargs sh, xargs -I{} bash, etc.
+// We scan the full command directly (not via chainSegments) because xargs uses {}
+// which would be split by the chain iterator on '{'.
+pub fn hasXargsShell(command: []const u8) bool {
+    const shell_names = rules.shell_names;
+    var offset: usize = 0;
+    while (offset < command.len) {
+        if (std.mem.indexOfPos(u8, command, offset, "xargs ")) |idx| {
+            // Word boundary check
+            const before_ok = idx == 0 or !std.ascii.isAlphanumeric(command[idx - 1]);
+            if (!before_ok) {
+                offset = idx + 6;
+                continue;
+            }
+            // Find the end of this xargs segment (up to &&, ||, ;, or |)
+            const rest = command[idx + 6 ..];
+            const seg_end = findSegmentEnd(rest);
+            const segment = rest[0..seg_end];
+            // Check if any shell name appears as a word in this segment
+            for (shell_names) |shell| {
+                var soff: usize = 0;
+                while (soff < segment.len) {
+                    if (std.mem.indexOfPos(u8, segment, soff, shell)) |sidx| {
+                        const sb_ok = sidx == 0 or !std.ascii.isAlphanumeric(segment[sidx - 1]);
+                        const send = sidx + shell.len;
+                        const sa_ok = send >= segment.len or !std.ascii.isAlphanumeric(segment[send]);
+                        if (sb_ok and sa_ok) return true;
+                        soff = sidx + 1;
+                    } else break;
+                }
+            }
+            offset = idx + 6 + seg_end;
+        } else break;
+    }
+    return false;
+}
+
+// Find the end of a command segment (stopping at &&, ||, ;, but NOT |{} which may be xargs/sed)
+fn findSegmentEnd(s: []const u8) usize {
+    var i: usize = 0;
+    while (i < s.len) {
+        if (s[i] == ';') return i;
+        if (s[i] == '&' and i + 1 < s.len and s[i + 1] == '&') return i;
+        if (s[i] == '|' and i + 1 < s.len and s[i + 1] == '|') return i;
+        // Single | is a pipe — end segment for xargs
+        if (s[i] == '|' and (i + 1 >= s.len or s[i + 1] != '|')) return i;
+        i += 1;
+    }
+    return s.len;
 }
 
 // --- DNS exfiltration detection ---

@@ -47,6 +47,8 @@ pub const dangerous_commands = [_][]const u8{
     "codesign ",
     "dscl ",
     "PlistBuddy ",
+    // Named pipe — used for IPC backdoors
+    "mkfifo ",
 };
 
 // Reverse shell / code injection patterns
@@ -238,6 +240,30 @@ pub const cmd_subst_indicators = [_][]const u8{
 pub const shell_obfuscation_patterns = [_][]const u8{
     "$'\\x", // ANSI-C hex quoting: $'\x72\x6d' = rm
     "$'\\0", // ANSI-C octal quoting
+    "@P}", // ${var@P}: Bash prompt expansion — can execute commands
+};
+
+// Command options that execute arbitrary programs (Flatt Security "8 ways")
+pub const command_exec_options = [_][]const u8{
+    "--compress-program", // sort/tar/rsync: executes argument as compressor
+    "--pager=", // git/man: executes argument as pager
+};
+
+// man-specific dangerous options (compound: require "man " context)
+pub const man_context = [_][]const u8{"man "};
+pub const man_dangerous_options = [_][]const u8{
+    "--html=",
+    "--html ",
+    "--browser=",
+    "--browser ",
+};
+
+// git remote command execution via --upload-pack (abbreviated argument matching)
+pub const git_remote_context = [_][]const u8{ "git ls-remote", "git fetch", "git clone", "git pull" };
+pub const git_upload_pack_patterns = [_][]const u8{
+    "--upload-pack",
+    "--upload-pa", // Git abbreviated argument matching
+    "-u ", // Short form of --upload-pack
 };
 
 // Container escape patterns (substring match)
@@ -298,6 +324,10 @@ pub const prefix_only_commands = [_][]const u8{
     // Script sourcing — executes arbitrary scripts in current shell
     "source",
     ".",
+    // Coprocess — creates background shell process
+    "coproc",
+    // Alias definition — persistence/hijacking attack vector
+    "alias ",
 };
 
 // System paths that should not be edited/written
