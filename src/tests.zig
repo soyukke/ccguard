@@ -29,4 +29,5 @@ comptime {
     _ = @import("tests/encoding_exfil.zig");
     _ = @import("tests/clipboard.zig");
     _ = @import("tests/browser_hijack.zig");
+    _ = @import("tests/history_files.zig");
 }
