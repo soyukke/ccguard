@@ -99,3 +99,45 @@ test "block proc access despite echo git commit with -m" {
     const r = evaluate(.{ .tool_name = "Bash", .tool_input = .{ .command = "echo \"git commit\" && cat -m /proc/self/environ" } });
     try std.testing.expectEqual(.deny, r.decision);
 }
+
+// --- git config dangerous keys (issue #3) ---
+
+test "block git config core.hooksPath" {
+    const r = evaluate(.{ .tool_name = "Bash", .tool_input = .{ .command = "git config core.hooksPath /tmp/evil-hooks" } });
+    try std.testing.expectEqual(.deny, r.decision);
+}
+
+test "block git config --global core.hooksPath" {
+    const r = evaluate(.{ .tool_name = "Bash", .tool_input = .{ .command = "git config --global core.hooksPath /tmp/evil" } });
+    try std.testing.expectEqual(.deny, r.decision);
+}
+
+test "block git config alias with shell command" {
+    const r = evaluate(.{ .tool_name = "Bash", .tool_input = .{ .command = "git config alias.st '!rm -rf /'" } });
+    try std.testing.expectEqual(.deny, r.decision);
+}
+
+test "block git config core.pager" {
+    const r = evaluate(.{ .tool_name = "Bash", .tool_input = .{ .command = "git config core.pager '!evil'" } });
+    try std.testing.expectEqual(.deny, r.decision);
+}
+
+test "block git config core.editor" {
+    const r = evaluate(.{ .tool_name = "Bash", .tool_input = .{ .command = "git config core.editor 'vim -c :!evil'" } });
+    try std.testing.expectEqual(.deny, r.decision);
+}
+
+test "block git config core.sshCommand" {
+    const r = evaluate(.{ .tool_name = "Bash", .tool_input = .{ .command = "git config core.sshCommand 'evil'" } });
+    try std.testing.expectEqual(.deny, r.decision);
+}
+
+test "allow git config user.email" {
+    const r = evaluate(.{ .tool_name = "Bash", .tool_input = .{ .command = "git config user.email 'user@example.com'" } });
+    try std.testing.expectEqual(.allow, r.decision);
+}
+
+test "allow git config core.autocrlf" {
+    const r = evaluate(.{ .tool_name = "Bash", .tool_input = .{ .command = "git config core.autocrlf true" } });
+    try std.testing.expectEqual(.allow, r.decision);
+}

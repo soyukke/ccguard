@@ -17,4 +17,13 @@ comptime {
     _ = @import("tests/git.zig");
     _ = @import("tests/supply_chain.zig");
     _ = @import("tests/compound_commands.zig");
+    _ = @import("tests/system_commands.zig");
+    _ = @import("tests/cicd_protection.zig");
+    _ = @import("tests/notebook.zig");
+    _ = @import("tests/upload_exfil.zig");
+    _ = @import("tests/redirect.zig");
+    _ = @import("tests/download_execute.zig");
+    _ = @import("tests/symlink.zig");
+    _ = @import("tests/mcp_tools.zig");
+    _ = @import("tests/var_indirection.zig");
 }

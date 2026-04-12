@@ -294,6 +294,95 @@ fn findSegmentEnd(s: []const u8) usize {
     return s.len;
 }
 
+// --- Shell script execution detection ---
+
+// Detect shell binary executing a script file: bash /tmp/script.sh, sh ./evil.sh
+// Allows: bash -c '...', bash --version, bash (no args)
+// Uses ChainIterator to check each segment independently.
+pub fn hasShellScriptExec(command: []const u8) bool {
+    const shell_names = rules.shell_names;
+    var iter = analyzer.ChainIterator{
+        .remaining = command,
+        .separators = &analyzer.chain_separators,
+    };
+    while (iter.next()) |segment| {
+        const trimmed = std.mem.trimLeft(u8, segment, " \t\n\r");
+        // Strip shell prefix (command, builtin, VAR=val)
+        const stripped = analyzer.stripShellPrefix(trimmed);
+        // Check if segment starts with a shell name
+        for (shell_names) |shell| {
+            if (std.mem.startsWith(u8, stripped, shell)) {
+                // Must be followed by a space
+                if (stripped.len > shell.len and stripped[shell.len] == ' ') {
+                    const after_shell = std.mem.trimLeft(u8, stripped[shell.len + 1 ..], " \t");
+                    if (after_shell.len == 0) continue;
+                    // If next token starts with '-' it's a flag (bash -c, bash --version) — allow
+                    if (after_shell[0] == '-') continue;
+                    // Otherwise it's a file path — block
+                    return true;
+                }
+            }
+        }
+    }
+    return false;
+}
+
+// --- Redirect target extraction ---
+
+// Check if a command contains a redirect (> or >>) to a path that matches any of the given patterns.
+// This enables detecting `echo "evil" > ~/.bashrc` even though echo is a safe_arg_command.
+pub fn hasRedirectToPattern(command: []const u8, patterns: []const []const u8) bool {
+    var i: usize = 0;
+    while (i < command.len) {
+        if (command[i] == '>') {
+            // Skip >> (append) — still a redirect
+            var redir_end = i + 1;
+            if (redir_end < command.len and command[redir_end] == '>') redir_end += 1;
+            // Skip whitespace after >
+            const after = std.mem.trimLeft(u8, command[redir_end..], " \t");
+            // Extract the target path token
+            const token_end = std.mem.indexOfAny(u8, after, " \t\n;|&") orelse after.len;
+            if (token_end > 0) {
+                const target = after[0..token_end];
+                for (patterns) |pattern| {
+                    if (std.mem.indexOf(u8, target, pattern) != null) return true;
+                    // Also match relative paths: pattern "/.foo" should match target ".foo"
+                    if (pattern.len > 0 and pattern[0] == '/') {
+                        if (std.mem.indexOf(u8, target, pattern[1..]) != null) return true;
+                    }
+                }
+            }
+            i = redir_end;
+        } else {
+            i += 1;
+        }
+    }
+    return false;
+}
+
+// Check if a command contains a redirect to a system path (startsWith check).
+pub fn hasRedirectToSystemPath(command: []const u8, prefixes: []const []const u8) bool {
+    var i: usize = 0;
+    while (i < command.len) {
+        if (command[i] == '>') {
+            var redir_end = i + 1;
+            if (redir_end < command.len and command[redir_end] == '>') redir_end += 1;
+            const after = std.mem.trimLeft(u8, command[redir_end..], " \t");
+            const token_end = std.mem.indexOfAny(u8, after, " \t\n;|&") orelse after.len;
+            if (token_end > 0) {
+                const target = after[0..token_end];
+                for (prefixes) |prefix| {
+                    if (std.mem.startsWith(u8, target, prefix)) return true;
+                }
+            }
+            i = redir_end;
+        } else {
+            i += 1;
+        }
+    }
+    return false;
+}
+
 // --- DNS exfiltration detection ---
 
 // Check if a DNS command (nslookup/dig) appears as a standalone word in the command
