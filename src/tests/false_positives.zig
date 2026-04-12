@@ -187,3 +187,33 @@ test "allow command substitution literal in single quotes" {
     const r = evaluate(.{ .tool_name = "Bash", .tool_input = .{ .command = "echo '$(sudo reboot)'" } });
     try std.testing.expectEqual(.allow, r.decision);
 }
+
+// --- Segment-scoped compound checks (issue #41) ---
+// Compound checks must verify both patterns in the same segment, not cross-segment.
+
+test "allow python version then grep socket" {
+    // python -c in segment 1, "socket" in segment 2 (grep arg) — not a real threat
+    const r = evaluate(.{ .tool_name = "Bash", .tool_input = .{ .command = "python -c 'print(1)' && grep socket server.py" } });
+    try std.testing.expectEqual(.allow, r.decision);
+}
+
+test "allow python hello then grep subprocess" {
+    const r = evaluate(.{ .tool_name = "Bash", .tool_input = .{ .command = "python3 -c 'print(\"hello\")' && grep subprocess utils.py" } });
+    try std.testing.expectEqual(.allow, r.decision);
+}
+
+test "allow node version then echo child_process" {
+    const r = evaluate(.{ .tool_name = "Bash", .tool_input = .{ .command = "node -e 'console.log(1)' && echo 'uses child_process'" } });
+    try std.testing.expectEqual(.allow, r.decision);
+}
+
+test "block python -c with socket in same segment" {
+    // Both patterns in the same segment — real threat
+    const r = evaluate(.{ .tool_name = "Bash", .tool_input = .{ .command = "python -c 'import socket; s=socket.socket()'" } });
+    try std.testing.expectEqual(.deny, r.decision);
+}
+
+test "block node -e with child_process in same segment" {
+    const r = evaluate(.{ .tool_name = "Bash", .tool_input = .{ .command = "node -e 'require(\"child_process\").execSync(\"id\")'" } });
+    try std.testing.expectEqual(.deny, r.decision);
+}

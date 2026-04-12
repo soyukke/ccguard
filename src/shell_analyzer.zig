@@ -227,3 +227,23 @@ pub fn containsPatternSafe(command: []const u8, patterns: []const []const u8) bo
     }
     return false;
 }
+
+// Check if BOTH context and payload patterns exist in the SAME non-safe-arg segment.
+// Used for compound checks where cross-segment matching causes false positives (issue #41).
+pub fn containsCompoundInSegment(
+    command: []const u8,
+    context_patterns: []const []const u8,
+    payload_patterns: []const []const u8,
+) bool {
+    var it = chainSegments(command);
+    while (it.next()) |segment| {
+        if (!isSafeArgCommand(segment)) {
+            if (containsPattern(segment, context_patterns) and
+                containsPattern(segment, payload_patterns))
+            {
+                return true;
+            }
+        }
+    }
+    return false;
+}
