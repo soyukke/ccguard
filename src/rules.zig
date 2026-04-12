@@ -54,6 +54,11 @@ pub const dangerous_commands = [_][]const u8{
     "PlistBuddy ",
     // Named pipe — used for IPC backdoors
     "mkfifo ",
+    // Browser remote debugging / automation hijacking (issue #20)
+    "--remote-debugging-port",
+    "puppeteer.connect",
+    "playwright.connect",
+    "chrome-remote-interface",
 };
 
 // Reverse shell / code injection patterns
