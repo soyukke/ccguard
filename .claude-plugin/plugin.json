@@ -1,0 +1,13 @@
+{
+  "name": "ccguard",
+  "version": "0.2.0",
+  "description": "Security guard for Claude Code — blocks dangerous commands with shell-aware pattern matching (590+ tests, zero dependencies)",
+  "author": {
+    "name": "soyukke",
+    "url": "https://github.com/soyukke"
+  },
+  "homepage": "https://github.com/soyukke/ccguard",
+  "repository": "https://github.com/soyukke/ccguard",
+  "license": "MIT",
+  "keywords": ["security", "guard", "hook", "pretooluse", "shell", "defense"]
+}

@@ -7,6 +7,37 @@ on:
     branches: [main]
 
 jobs:
+  plugin-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate plugin metadata
+        run: |
+          # Check plugin.json
+          jq -e '.name and .version and .description and .author' .claude-plugin/plugin.json > /dev/null
+          echo "plugin.json: OK"
+
+          # Check marketplace.json
+          jq -e '.name and .owner.name and (.plugins | length > 0) and .plugins[0].name and .plugins[0].source' .claude-plugin/marketplace.json > /dev/null
+          echo "marketplace.json: OK"
+
+          # Check hooks.json
+          jq -e '.hooks.PreToolUse and .hooks.SessionStart' hooks/hooks.json > /dev/null
+          echo "hooks.json: OK"
+
+          # Check ensure-binary.sh is executable
+          test -x scripts/ensure-binary.sh
+          echo "ensure-binary.sh: executable OK"
+
+          # Version consistency: plugin.json matches build.zig.zon
+          PLUGIN_VER=$(jq -r '.version' .claude-plugin/plugin.json)
+          ZON_VER=$(grep '\.version = ' build.zig.zon | head -1 | sed 's/.*"\(.*\)".*/\1/')
+          if [ "$PLUGIN_VER" != "$ZON_VER" ]; then
+            echo "::error::plugin.json version ($PLUGIN_VER) != build.zig.zon version ($ZON_VER)"
+            exit 1
+          fi
+          echo "Version consistency: $PLUGIN_VER OK"
+
   test:
     strategy:
       matrix:
