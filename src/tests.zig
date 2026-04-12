@@ -32,4 +32,5 @@ comptime {
     _ = @import("tests/history_files.zig");
     _ = @import("tests/attack_tools.zig");
     _ = @import("tests/interpreter_exec.zig");
+    _ = @import("tests/self_protection.zig");
 }
