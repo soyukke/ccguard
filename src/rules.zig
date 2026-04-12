@@ -390,6 +390,24 @@ pub const prefix_only_commands = [_][]const u8{
     "strace",
     "ltrace",
     "gdb",
+    // Network reconnaissance (issue #22)
+    "nmap",
+    "masscan",
+    "zmap",
+    // Password cracking (issue #22)
+    "john",
+    "hashcat",
+    "hydra",
+    // Network sniffing (issue #22)
+    "tcpdump",
+    "tshark",
+    // Disk operations (issue #22)
+    "fdisk",
+    "parted",
+    "cryptsetup",
+    // Exploit frameworks (issue #22)
+    "msfconsole",
+    "sqlmap",
     // Clipboard access (issue #19) — AI agents should not read/write clipboard
     "pbpaste",
     "pbcopy",
