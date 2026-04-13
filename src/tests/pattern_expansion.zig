@@ -50,14 +50,14 @@ test "block curl IPv6 IMDS" {
 }
 
 // Additional CI/CD configs
-test "block Write .drone.yml" {
+test "ask Write .drone.yml" {
     const r = evaluate(.{ .tool_name = "Write", .tool_input = .{ .file_path = "/home/user/project/.drone.yml" } });
-    try std.testing.expectEqual(.deny, r.decision);
+    try std.testing.expectEqual(.ask, r.decision);
 }
 
-test "block Write .buildkite/pipeline.yml" {
+test "ask Write .buildkite/pipeline.yml" {
     const r = evaluate(.{ .tool_name = "Write", .tool_input = .{ .file_path = "/home/user/project/.buildkite/pipeline.yml" } });
-    try std.testing.expectEqual(.deny, r.decision);
+    try std.testing.expectEqual(.ask, r.decision);
 }
 
 // --- FP prevention ---

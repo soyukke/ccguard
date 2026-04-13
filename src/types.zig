@@ -14,6 +14,9 @@ pub const ToolInput = struct {
 pub const Decision = enum {
     allow,
     deny,
+    /// Delegate to Claude Code's default permission flow (user confirmation prompt).
+    /// Hook outputs warning to stderr but does not emit permissionDecision JSON.
+    ask,
 };
 
 pub const RuleResult = struct {

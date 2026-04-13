@@ -223,9 +223,14 @@ fn checkBashCommand(raw_command: []const u8) RuleResult {
         return .{ .decision = .deny, .reason = "shell/git config modification blocked" };
     }
 
-    // Bash write to CI/CD pipeline configs
+    // Bash write to IaC state files (hard deny)
+    if (analyzer.containsPatternSafe(command, &rules.iac_state_patterns)) {
+        return .{ .decision = .deny, .reason = "IaC state file modification blocked" };
+    }
+
+    // Bash write to CI/CD pipeline configs (ask user)
     if (analyzer.containsPatternSafe(command, &rules.cicd_config_patterns)) {
-        return .{ .decision = .deny, .reason = "CI/CD pipeline config modification blocked" };
+        return .{ .decision = .ask, .reason = "CI/CD pipeline config modification — confirm with user" };
     }
 
     // Redirect target checks (issue #2): catch `echo "evil" > ~/.bashrc` etc.
@@ -237,7 +242,7 @@ fn checkBashCommand(raw_command: []const u8) RuleResult {
         return .{ .decision = .deny, .reason = "redirect to sensitive file blocked" };
     }
     if (detector.hasRedirectToPattern(command, &rules.cicd_config_patterns)) {
-        return .{ .decision = .deny, .reason = "redirect to CI/CD config blocked" };
+        return .{ .decision = .ask, .reason = "redirect to CI/CD config — confirm with user" };
     }
     if (detector.hasRedirectToSystemPath(command, &rules.system_path_patterns)) {
         return .{ .decision = .deny, .reason = "redirect to system path blocked" };
@@ -285,8 +290,11 @@ fn checkFileAccess(raw_file_path: []const u8, tool_name: []const u8) RuleResult 
         if (analyzer.containsPattern(file_path, &rules.shell_config_patterns)) {
             return .{ .decision = .deny, .reason = "shell/git config modification blocked" };
         }
+        if (analyzer.containsPattern(file_path, &rules.iac_state_patterns)) {
+            return .{ .decision = .deny, .reason = "IaC state file modification blocked" };
+        }
         if (analyzer.containsPattern(file_path, &rules.cicd_config_patterns)) {
-            return .{ .decision = .deny, .reason = "CI/CD pipeline config modification blocked" };
+            return .{ .decision = .ask, .reason = "CI/CD pipeline config modification — confirm with user" };
         }
         for (rules.system_path_patterns) |prefix| {
             if (std.mem.startsWith(u8, file_path, prefix)) {

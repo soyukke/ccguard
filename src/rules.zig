@@ -525,8 +525,9 @@ pub const shell_config_patterns = [_][]const u8{
 
 // safe_arg_commands moved to shell_analyzer.zig (detection mechanics, not policy)
 
-// CI/CD pipeline and IaC state file protection (issue #12)
-// Blocked for Edit/Write only (not Read) — supply chain attack vector.
+// CI/CD pipeline config protection (issue #12)
+// Ask user for confirmation on Edit/Write (not Read) — supply chain attack vector
+// but also commonly edited during development.
 pub const cicd_config_patterns = [_][]const u8{
     // GitHub Actions
     "/.github/workflows/",
@@ -540,12 +541,15 @@ pub const cicd_config_patterns = [_][]const u8{
     ".travis.yml",
     // Bitbucket Pipelines
     "bitbucket-pipelines.yml",
-    // Terraform state (contains credentials/sensitive resource IDs)
-    "terraform.tfstate",
     // Additional CI/CD systems (issue #57)
     ".drone.yml",
     "/.buildkite/",
     ".woodpecker.yml",
+};
+
+// IaC state files — hard deny (contain credentials/sensitive resource IDs)
+pub const iac_state_patterns = [_][]const u8{
+    "terraform.tfstate",
 };
 
 pub const env_template_suffixes = [_][]const u8{
