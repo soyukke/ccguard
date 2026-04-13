@@ -316,6 +316,23 @@ pub const man_dangerous_options = [_][]const u8{
     "--browser ",
 };
 
+// gh api write operations — read-only GET is allowed, mutations are blocked
+pub const gh_api_context = [_][]const u8{"gh api"};
+pub const gh_api_write_flags = [_][]const u8{
+    " -X POST",
+    " -X PUT",
+    " -X PATCH",
+    " -X DELETE",
+    " -f ",    // --field (sends data)
+    " -F ",    // --field (file upload)
+    " --field ",
+    " --input ",
+    " --method POST",
+    " --method PUT",
+    " --method PATCH",
+    " --method DELETE",
+};
+
 // git remote command execution via --upload-pack (abbreviated argument matching)
 pub const git_remote_context = [_][]const u8{ "git ls-remote", "git fetch", "git clone", "git pull" };
 pub const git_upload_pack_patterns = [_][]const u8{
@@ -442,8 +459,7 @@ pub const prefix_only_commands = [_][]const u8{
     "gsutil cp",
     "gsutil rsync",
     "az storage blob upload",
-    // GitHub CLI authenticated API calls (issue #55)
-    "gh api",
+    // gh api: moved to gh_api compound check (read-only GET is allowed)
     // Multi-cloud transfer tool (issue #55)
     "rclone copy",
     "rclone sync",

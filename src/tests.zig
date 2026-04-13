@@ -43,4 +43,5 @@ comptime {
     _ = @import("tests/cloud_cli_exfil.zig");
     _ = @import("tests/webfetch_vscode.zig");
     _ = @import("tests/pattern_expansion.zig");
+    _ = @import("tests/gh_api.zig");
 }
