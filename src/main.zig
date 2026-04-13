@@ -19,9 +19,15 @@ fn writeOutput(writer: anytype, result: types.RuleResult) !void {
             );
         },
         .ask => {
-            // Output nothing to stdout — Claude Code falls back to its default
-            // permission flow (user confirmation prompt in auto-mode).
-            // Warning is emitted to stderr by the caller.
+            // Emit ask JSON — forces user confirmation prompt even if tool is in allow list.
+            try writer.writeAll(
+                \\{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"ask","permissionDecisionReason":"
+            );
+            try writer.writeAll(result.reason);
+            try writer.writeAll(
+                \\"}}
+                \\
+            );
         },
     }
 }
