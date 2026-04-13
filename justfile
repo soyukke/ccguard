@@ -60,6 +60,29 @@ bench: release
         printf "%-35s %s\n" "$label" "$t"
     done
 
+# Validate plugin metadata (mirrors CI plugin-validate job)
+validate:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    jq -e '.name and .version and .description and .author' .claude-plugin/plugin.json > /dev/null
+    echo "plugin.json: OK"
+    jq -e '.name and .owner.name and (.plugins | length > 0) and .plugins[0].name and .plugins[0].source' .claude-plugin/marketplace.json > /dev/null
+    echo "marketplace.json: OK"
+    jq -e '.hooks.PreToolUse and .hooks.SessionStart' hooks/hooks.json > /dev/null
+    echo "hooks.json: OK"
+    test -x scripts/ensure-binary.sh
+    echo "ensure-binary.sh: executable OK"
+    PLUGIN_VER=$(jq -r '.version' .claude-plugin/plugin.json)
+    ZON_VER=$(grep '\.version = ' build.zig.zon | head -1 | sed 's/.*"\(.*\)".*/\1/')
+    MAIN_VER=$(grep -o 'ccguard [0-9][0-9.]*' src/main.zig | head -1 | awk '{print $2}')
+    if [ "$PLUGIN_VER" != "$ZON_VER" ]; then
+        echo "ERROR: plugin.json ($PLUGIN_VER) != build.zig.zon ($ZON_VER)"; exit 1
+    fi
+    if [ "$PLUGIN_VER" != "$MAIN_VER" ]; then
+        echo "ERROR: plugin.json ($PLUGIN_VER) != main.zig ($MAIN_VER)"; exit 1
+    fi
+    echo "Version consistency: $PLUGIN_VER OK"
+
 # Show current version
 version:
     @grep '\.version = ' build.zig.zon | head -1 | sed 's/.*"\(.*\)".*/\1/'

@@ -20,6 +20,7 @@ just test      # Run tests
 just build     # Debug build
 just release   # Release build
 just install   # Release build + install to ~/.local/bin
+just validate  # Plugin metadata + version consistency check (mirrors CI)
 just bench     # Benchmark all rule categories
 ```
 
