@@ -7,6 +7,7 @@ const normalizer = @import("normalizer.zig");
 const path_matcher = @import("path_matcher.zig");
 const analyzer = @import("shell_analyzer.zig");
 const detector = @import("shell_detector.zig");
+const tok = @import("tokenizer.zig");
 
 const RuleResult = types.RuleResult;
 const HookInput = types.HookInput;
@@ -102,6 +103,17 @@ fn checkBashCommand(raw_command: []const u8) RuleResult {
 
     if (analyzer.matchesPrefixInChain(command, &rules.prefix_only_commands)) {
         return .{ .decision = .deny, .reason = "dangerous shell builtin blocked" };
+    }
+
+    // Tokenizer-based structural analysis — catches commands separated by `&` (background)
+    // which the string-based ChainIterator misses. The tokenizer properly handles all
+    // shell operators including &, &&, ||, ;, |, $(), etc.
+    const tokens = tok.tokenize(raw_command);
+    if (tok.hasBlockedCommandPrefix(&tokens, &rules.prefix_only_commands)) {
+        return .{ .decision = .deny, .reason = "dangerous shell builtin blocked" };
+    }
+    if (tok.hasShellScriptExecTokenized(&tokens)) {
+        return .{ .decision = .deny, .reason = "shell script execution blocked" };
     }
 
     // sed 's/X/Y/e' execute modifier (Flatt Security CVE defense)
