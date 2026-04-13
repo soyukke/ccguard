@@ -286,6 +286,9 @@ fn runCheck(args: []const [:0]const u8) !void {
             try out_writer.print("DENY: {s}\n", .{result.reason});
             std.process.exit(2);
         },
+        .ask => {
+            try out_writer.print("ASK: {s}\n", .{result.reason});
+        },
     }
 }
 
