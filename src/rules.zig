@@ -291,6 +291,7 @@ pub const cmd_subst_indicators = [_][]const u8{
 pub const shell_obfuscation_patterns = [_][]const u8{
     "$'\\x", // ANSI-C hex quoting: $'\x72\x6d' = rm
     "$'\\0", // ANSI-C octal quoting
+    "$'\\u", // ANSI-C unicode escape: $'\u0072\u006d' = rm
     "@P}", // ${var@P}: Bash prompt expansion — can execute commands
 };
 
@@ -412,6 +413,8 @@ pub const prefix_only_commands = [_][]const u8{
     "security",
     "at",
     "batch",
+    // Shell self-reference — $0 expands to current shell binary name
+    "$0",
     // Script sourcing — executes arbitrary scripts in current shell
     "source",
     ".",

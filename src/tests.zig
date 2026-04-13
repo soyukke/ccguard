@@ -44,4 +44,5 @@ comptime {
     _ = @import("tests/webfetch_vscode.zig");
     _ = @import("tests/pattern_expansion.zig");
     _ = @import("tests/gh_api.zig");
+    _ = @import("tests/obfuscation_hardening.zig");
 }

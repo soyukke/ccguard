@@ -70,7 +70,23 @@ fn isCodeExecArg(input: []const u8, pos: usize) bool {
     return false;
 }
 
-// Pass 1: Tabs → space, ${IFS}/$IFS → space, quote stripping, backslash-newline removal.
+// Check if position starts a zero-width Unicode character (invisible obfuscation).
+// Returns byte length to skip, or 0 if not a zero-width char.
+fn zeroWidthLen(input: []const u8, i: usize) usize {
+    if (i + 2 < input.len and input[i] == 0xE2 and input[i + 1] == 0x80) {
+        // U+200B zero-width space, U+200C non-joiner, U+200D joiner
+        if (input[i + 2] >= 0x8B and input[i + 2] <= 0x8D) return 3;
+    }
+    if (i + 2 < input.len and input[i] == 0xE2 and input[i + 1] == 0x81 and input[i + 2] == 0xA0) {
+        return 3; // U+2060 word joiner
+    }
+    if (i + 2 < input.len and input[i] == 0xEF and input[i + 1] == 0xBB and input[i + 2] == 0xBF) {
+        return 3; // U+FEFF BOM / zero-width no-break space
+    }
+    return 0;
+}
+
+// Pass 1: Zero-width char strip, tabs → space, ${IFS}/$IFS → space, quote stripping, backslash-newline removal.
 // Quote-aware: replaces shell metacharacters inside quotes with a sentinel byte
 // to prevent false chain splits and redirect detection (issue #40).
 // Exception: quotes that are arguments to code-execution flags (-c, -e) are NOT
@@ -80,6 +96,12 @@ fn normalizeBasic(buf: []u8, input: []const u8) usize {
     var i: usize = 0;
     const len = @min(input.len, buf.len);
     while (i < len) {
+        // Strip zero-width Unicode characters (obfuscation defense)
+        const zwl = zeroWidthLen(input, i);
+        if (zwl > 0) {
+            i += zwl;
+            continue;
+        }
         if (input[i] == '\\' and i + 1 < len and input[i + 1] == '\n') {
             i += 2;
         } else if (input[i] == '\t') {
