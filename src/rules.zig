@@ -293,7 +293,14 @@ pub const shell_obfuscation_patterns = [_][]const u8{
 // Command options that execute arbitrary programs (Flatt Security "8 ways")
 pub const command_exec_options = [_][]const u8{
     "--compress-program", // sort/tar/rsync: executes argument as compressor
+    "--use-compress-program", // GNU tar synonym for --compress-program
     "--pager=", // git/man: executes argument as pager
+    "--to-command", // tar: passes extracted files to command via stdin (issue #51)
+    "--checkpoint-action=exec", // tar: inline form --checkpoint-action=exec=CMD (issue #51)
+    "--checkpoint-action exec", // tar: space form --checkpoint-action exec=CMD (issue #51)
+    "--info-script", // tar: volume change script execution (issue #51)
+    "--new-volume-script", // tar: volume change script execution (issue #51)
+    " -I ", // tar: short form of --use-compress-program (issue #51)
 };
 
 // man-specific dangerous options (compound: require "man " context)
