@@ -327,6 +327,10 @@ pub const docker_dangerous_patterns = [_][]const u8{
     "--privileged",
     "-v /:/",
     "-v/:/",
+    // Container command execution / file transfer (issue #54)
+    " exec ",
+    " exec -",
+    " cp ",
 };
 
 // Library injection patterns (always block regardless of safe-arg)
@@ -415,6 +419,20 @@ pub const prefix_only_commands = [_][]const u8{
     "xsel",
     "wl-paste",
     "wl-copy",
+    // npx: downloads and executes arbitrary npm packages (issue #54)
+    "npx",
+    // Kubernetes admin commands (issue #54) — cluster mutation
+    "kubectl exec",
+    "kubectl apply",
+    "kubectl delete",
+    "kubectl run",
+    // Infrastructure-as-Code mutation (issue #54)
+    "terraform apply",
+    "terraform destroy",
+    "helm install",
+    "helm upgrade",
+    "pulumi up",
+    "pulumi destroy",
 };
 
 // System paths that should not be edited/written
