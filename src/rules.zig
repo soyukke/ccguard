@@ -408,6 +408,19 @@ pub const prefix_only_commands = [_][]const u8{
     // Exploit frameworks (issue #22)
     "msfconsole",
     "sqlmap",
+    // Cloud CLI data transfer (issue #55) — exfiltration via cloud storage
+    "aws s3 cp",
+    "aws s3 sync",
+    "aws s3 mv",
+    "gsutil cp",
+    "gsutil rsync",
+    "az storage blob upload",
+    // GitHub CLI authenticated API calls (issue #55)
+    "gh api",
+    // Multi-cloud transfer tool (issue #55)
+    "rclone copy",
+    "rclone sync",
+    "rclone move",
     // Clipboard access (issue #19) — AI agents should not read/write clipboard
     "pbpaste",
     "pbcopy",
