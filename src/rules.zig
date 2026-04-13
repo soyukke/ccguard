@@ -340,11 +340,22 @@ pub const docker_dangerous_patterns = [_][]const u8{
     "-v/:/",
 };
 
-// Library injection patterns (always block regardless of safe-arg)
+// Library/environment injection patterns (always block regardless of safe-arg)
 pub const lib_injection_patterns = [_][]const u8{
     "LD_PRELOAD=",
     "DYLD_INSERT_LIBRARIES=",
     "LD_LIBRARY_PATH=",
+    // Shell env var injection (issue #52): auto-sourced scripts
+    "BASH_ENV=",
+    // ENV= needs word-boundary: space prefix + segment-start variant to avoid FP with BUILD_ENV= etc.
+    " ENV=",
+    // Note: segment-start case handled by evaluator prefix check below
+    // Interpreter env var injection (issue #52): module/flag injection
+    "NODE_OPTIONS=",
+    "PERL5OPT=",
+    "RUBYOPT=",
+    "PYTHONSTARTUP=",
+    "PYTHONPATH=",
 };
 
 // Cloud metadata endpoint patterns (IMDS credential theft)

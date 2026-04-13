@@ -37,4 +37,5 @@ comptime {
     _ = @import("tests/shell_keywords.zig");
     _ = @import("tests/pipe_to_interpreter.zig");
     _ = @import("tests/tar_exec.zig");
+    _ = @import("tests/env_injection.zig");
 }
