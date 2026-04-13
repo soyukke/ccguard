@@ -284,6 +284,14 @@ pub fn evaluate(input: HookInput) RuleResult {
         const result = checkFileAccess(fp, "Write");
         if (result.decision == .deny) return result;
     }
+    // Check url field for credential exfiltration (issue #56)
+    if (tool_input.url) |url| {
+        if (analyzer.containsPattern(url, &rules.credential_literal_patterns) or
+            analyzer.containsPattern(url, &rules.sensitive_env_vars))
+        {
+            return .{ .decision = .deny, .reason = "credential in URL blocked" };
+        }
+    }
 
     return .{ .decision = .allow, .reason = "" };
 }

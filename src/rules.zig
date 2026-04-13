@@ -448,9 +448,12 @@ pub const shell_config_patterns = [_][]const u8{
     // MCP configuration protection
     ".mcp.json",
     "/.cursor/rules",
-    // VSCode / IDE MCP and settings protection
+    // VSCode / IDE MCP and settings protection (IDEsaster CVE-2025-54130)
     ".vscode/mcp.json",
     ".vscode/settings.json",
+    ".vscode/tasks.json",
+    ".vscode/launch.json",
+    ".vscode/extensions.json",
     "cline_mcp_settings.json",
     "/.continue/config.json",
     // JetBrains IDE config protection (IDEsaster CVE-2025-54130)
