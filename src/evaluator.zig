@@ -22,9 +22,13 @@ fn checkBashCommand(raw_command: []const u8) RuleResult {
     var commit_buf: [65536]u8 = undefined;
     const commit_stripped = normalizer.stripCommitMessage(&commit_buf, raw_command);
 
+    // Strip heredoc bodies — content between <<DELIM and DELIM is data, not commands
+    var heredoc_buf: [65536]u8 = undefined;
+    const heredoc_stripped = normalizer.stripHeredocBodies(&heredoc_buf, commit_stripped);
+
     // Then normalize shell evasion patterns
     var norm_buf: [65536]u8 = undefined;
-    const command = normalizer.normalizeShellEvasion(&norm_buf, commit_stripped);
+    const command = normalizer.normalizeShellEvasion(&norm_buf, heredoc_stripped);
 
     // Block excessive command chaining (50+ segment bypass defense)
     if (analyzer.countChainSegments(command) > 50) {
@@ -106,12 +110,13 @@ fn checkBashCommand(raw_command: []const u8) RuleResult {
     }
 
     // Tokenizer-based structural analysis — catches commands separated by `&` (background)
-    // which the string-based ChainIterator misses. The tokenizer uses a streaming iterator
-    // (24 bytes state) instead of materializing all tokens, avoiding comptime overhead.
-    if (tok.hasBlockedCommandPrefix(raw_command, &rules.prefix_only_commands)) {
+    // which the string-based ChainIterator misses. Uses normalized command (post-heredoc
+    // strip, post-evasion normalization) so ${IFS} obfuscation is resolved and heredoc
+    // body content doesn't trigger false positives.
+    if (tok.hasBlockedCommandPrefix(command, &rules.prefix_only_commands)) {
         return .{ .decision = .deny, .reason = "dangerous shell builtin blocked" };
     }
-    if (tok.hasShellScriptExecTokenized(raw_command)) {
+    if (tok.hasShellScriptExecTokenized(command)) {
         return .{ .decision = .deny, .reason = "shell script execution blocked" };
     }
 

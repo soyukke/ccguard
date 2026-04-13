@@ -58,7 +58,11 @@ pub fn stripShellPrefix(segment: []const u8) []const u8 {
     }
     // Strip transparent wrapper prefixes (command/builtin/nohup/time/watch)
     // Loop to handle multiple levels: e.g. "nohup command eval ..." → "eval ..."
-    const transparent = [_][]const u8{ "command ", "builtin ", "nohup ", "time ", "watch " };
+    const transparent = [_][]const u8{
+        "command ", "builtin ", "nohup ", "time ", "watch ",
+        // Shell keywords that introduce command lists (not commands themselves)
+        "then ", "do ", "else ", "elif ",
+    };
     var changed = true;
     while (changed) {
         changed = false;

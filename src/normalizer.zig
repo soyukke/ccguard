@@ -272,3 +272,128 @@ pub fn stripCommitMessage(buf: []u8, command: []const u8) []const u8 {
     @memcpy(buf[before.len..total], after);
     return buf[0..total];
 }
+
+/// Strip heredoc body content from shell commands.
+/// Heredoc bodies are DATA, not executable commands, so they should not be
+/// analyzed for security patterns. Removes lines between <<DELIM and DELIM.
+/// The << marker line (including any pipes/redirects) is preserved.
+pub fn stripHeredocBodies(buf: []u8, command: []const u8) []const u8 {
+    var out: usize = 0;
+    var i: usize = 0;
+    const len = @min(command.len, buf.len);
+    var in_single_quote = false;
+    var in_double_quote = false;
+
+    while (i < len) {
+        const c = command[i];
+
+        // Track quoting context (skip heredoc detection inside quotes)
+        if (!in_double_quote and c == '\'' and !in_single_quote) {
+            in_single_quote = true;
+            if (out < buf.len) { buf[out] = c; out += 1; }
+            i += 1;
+            // Copy until closing '
+            while (i < len and command[i] != '\'') {
+                if (out < buf.len) { buf[out] = command[i]; out += 1; }
+                i += 1;
+            }
+            if (i < len) {
+                if (out < buf.len) { buf[out] = command[i]; out += 1; }
+                i += 1;
+            }
+            in_single_quote = false;
+            continue;
+        }
+        if (!in_single_quote and c == '"') {
+            in_double_quote = !in_double_quote;
+            if (out < buf.len) { buf[out] = c; out += 1; }
+            i += 1;
+            continue;
+        }
+        if (in_single_quote or in_double_quote) {
+            if (out < buf.len) { buf[out] = c; out += 1; }
+            i += 1;
+            continue;
+        }
+
+        // Detect << (heredoc) but not <<< (here-string)
+        if (c == '<' and i + 1 < len and command[i + 1] == '<' and
+            (i + 2 >= len or command[i + 2] != '<'))
+        {
+            // Copy << to output
+            if (out + 1 < buf.len) { buf[out] = '<'; out += 1; buf[out] = '<'; out += 1; }
+            i += 2;
+
+            // Skip optional -
+            if (i < len and command[i] == '-') {
+                if (out < buf.len) { buf[out] = '-'; out += 1; }
+                i += 1;
+            }
+
+            // Skip whitespace (copy to output)
+            while (i < len and (command[i] == ' ' or command[i] == '\t')) {
+                if (out < buf.len) { buf[out] = command[i]; out += 1; }
+                i += 1;
+            }
+
+            // Extract delimiter
+            var delim_start: usize = i;
+            var delim_end: usize = i;
+            if (i < len and (command[i] == '\'' or command[i] == '"')) {
+                const quote = command[i];
+                if (out < buf.len) { buf[out] = command[i]; out += 1; }
+                i += 1;
+                delim_start = i;
+                while (i < len and command[i] != quote) {
+                    if (out < buf.len) { buf[out] = command[i]; out += 1; }
+                    i += 1;
+                }
+                delim_end = i;
+                if (i < len) {
+                    if (out < buf.len) { buf[out] = command[i]; out += 1; }
+                    i += 1;
+                }
+            } else {
+                delim_start = i;
+                while (i < len and command[i] != ' ' and command[i] != '\t' and
+                    command[i] != '\n' and command[i] != ';' and
+                    command[i] != '&' and command[i] != '|')
+                {
+                    if (out < buf.len) { buf[out] = command[i]; out += 1; }
+                    i += 1;
+                }
+                delim_end = i;
+            }
+
+            const delimiter = command[delim_start..delim_end];
+            if (delimiter.len == 0) continue;
+
+            // Copy rest of current line (preserves pipes, redirects, etc.)
+            while (i < len and command[i] != '\n') {
+                if (out < buf.len) { buf[out] = command[i]; out += 1; }
+                i += 1;
+            }
+            if (i < len) {
+                if (out < buf.len) { buf[out] = '\n'; out += 1; }
+                i += 1;
+            }
+
+            // Skip heredoc body lines until delimiter line
+            while (i < len) {
+                const line_start = i;
+                while (i < len and command[i] != '\n') i += 1;
+                const line = command[line_start..i];
+                if (i < len) i += 1; // skip \n
+
+                const trimmed = std.mem.trimLeft(u8, line, "\t");
+                if (std.mem.eql(u8, trimmed, delimiter)) break;
+            }
+            continue;
+        }
+
+        if (out < buf.len) { buf[out] = c; out += 1; }
+        i += 1;
+    }
+
+    return buf[0..out];
+}
