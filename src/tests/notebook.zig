@@ -24,9 +24,9 @@ test "block NotebookEdit to system path" {
     try std.testing.expectEqual(.deny, r.decision);
 }
 
-test "block NotebookEdit to CI/CD config" {
+test "ask NotebookEdit to CI/CD config" {
     const r = evaluate(.{ .tool_name = "NotebookEdit", .tool_input = .{ .file_path = "/home/user/project/.github/workflows/ci.yml" } });
-    try std.testing.expectEqual(.deny, r.decision);
+    try std.testing.expectEqual(.ask, r.decision);
 }
 
 test "allow NotebookEdit to normal notebook" {

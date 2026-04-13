@@ -50,9 +50,9 @@ test "block echo redirect to /etc/hosts" {
     try std.testing.expectEqual(.deny, r.decision);
 }
 
-test "block echo redirect to CI/CD config" {
+test "ask echo redirect to CI/CD config" {
     const r = evaluate(.{ .tool_name = "Bash", .tool_input = .{ .command = "echo 'step: evil' > .github/workflows/ci.yml" } });
-    try std.testing.expectEqual(.deny, r.decision);
+    try std.testing.expectEqual(.ask, r.decision);
 }
 
 // ALLOW: redirect to normal files (existing test preserved)

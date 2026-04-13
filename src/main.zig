@@ -18,6 +18,11 @@ fn writeOutput(writer: anytype, result: types.RuleResult) !void {
                 \\
             );
         },
+        .ask => {
+            // Output nothing to stdout — Claude Code falls back to its default
+            // permission flow (user confirmation prompt in auto-mode).
+            // Warning is emitted to stderr by the caller.
+        },
     }
 }
 
@@ -343,6 +348,11 @@ pub fn main() !void {
         const err_out: std.fs.File = .stderr();
         try err_out.deprecatedWriter().print("ccguard: {s}\n", .{result.reason});
         std.process.exit(2);
+    }
+    if (result.decision == .ask) {
+        // Warn on stderr but exit 0 — Claude Code's default permission flow handles it
+        const err_out: std.fs.File = .stderr();
+        try err_out.deprecatedWriter().print("ccguard: [ask] {s}\n", .{result.reason});
     }
 }
 
