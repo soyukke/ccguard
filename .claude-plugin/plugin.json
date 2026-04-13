@@ -1,7 +1,7 @@
 {
   "name": "ccguard",
-  "version": "0.2.0",
-  "description": "Security guard for Claude Code — blocks dangerous commands with shell-aware pattern matching (590+ tests, zero dependencies)",
+  "version": "0.3.0",
+  "description": "Security guard for Claude Code — blocks dangerous commands with shell-aware pattern matching (678 tests, zero dependencies)",
   "author": {
     "name": "soyukke",
     "url": "https://github.com/soyukke"
