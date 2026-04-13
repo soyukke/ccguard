@@ -164,6 +164,11 @@ fn checkBashCommand(raw_command: []const u8) RuleResult {
         return .{ .decision = .deny, .reason = "dangerous man option blocked" };
     }
 
+    // gh api write operations (GET is allowed, mutations are blocked)
+    if (analyzer.containsPatternSafe(command, &rules.gh_api_context) and analyzer.containsPattern(command, &rules.gh_api_write_flags)) {
+        return .{ .decision = .deny, .reason = "gh api write operation blocked" };
+    }
+
     // git --upload-pack abbreviated argument attack
     if (analyzer.containsPatternSafe(command, &rules.git_remote_context) and analyzer.containsPatternSafe(command, &rules.git_upload_pack_patterns)) {
         return .{ .decision = .deny, .reason = "dangerous git remote option blocked" };
