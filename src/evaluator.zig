@@ -12,6 +12,25 @@ const tok = @import("tokenizer.zig");
 const RuleResult = types.RuleResult;
 const HookInput = types.HookInput;
 
+// Detect /proc/PID/root/ path prefix (issue #53).
+// /proc/self/root and /proc/PID/root provide alternative root filesystem paths
+// that bypass path-prefix checks like system_path_patterns.
+fn isProcRootPath(path: []const u8) bool {
+    const prefix = "/proc/";
+    if (!std.mem.startsWith(u8, path, prefix)) return false;
+    var i: usize = prefix.len;
+    if (std.mem.startsWith(u8, path[i..], "self/")) {
+        i += "self/".len;
+    } else {
+        // Numeric PID
+        const pid_start = i;
+        while (i < path.len and std.ascii.isDigit(path[i])) i += 1;
+        if (i == pid_start or i >= path.len or path[i] != '/') return false;
+        i += 1;
+    }
+    return std.mem.startsWith(u8, path[i..], "root/") or std.mem.eql(u8, path[i..], "root");
+}
+
 fn checkBashCommand(raw_command: []const u8) RuleResult {
     // Block ANSI-C quoting early (on raw input, before normalization)
     if (analyzer.containsPattern(raw_command, &rules.shell_obfuscation_patterns)) {
@@ -170,6 +189,13 @@ fn checkBashCommand(raw_command: []const u8) RuleResult {
         return .{ .decision = .deny, .reason = "proc secret access blocked" };
     }
 
+    // /proc/PID/root filesystem traversal (issue #53)
+    if (std.mem.indexOf(u8, command, "/proc/self/root/") != null or
+        std.mem.indexOf(u8, command, "/proc/1/root/") != null)
+    {
+        return .{ .decision = .deny, .reason = "/proc root filesystem access blocked" };
+    }
+
     // Library injection
     if (analyzer.containsPatternSafe(command, &rules.lib_injection_patterns)) {
         return .{ .decision = .deny, .reason = "library injection blocked" };
@@ -223,7 +249,15 @@ fn checkBashCommand(raw_command: []const u8) RuleResult {
 fn checkFileAccess(raw_file_path: []const u8, tool_name: []const u8) RuleResult {
     // Normalize path to prevent bypass via /./, /../, //
     var path_buf: [65536]u8 = undefined;
-    const string_normalized = normalizer.normalizePath(&path_buf, raw_file_path);
+    const path_normalized = normalizer.normalizePath(&path_buf, raw_file_path);
+
+    // Block /proc/PID/root/ access entirely (issue #53): this provides an alternative
+    // path to the root filesystem that bypasses all path-based checks.
+    // No legitimate reason to access files via /proc/self/root/ from a coding assistant.
+    if (isProcRootPath(path_normalized)) {
+        return .{ .decision = .deny, .reason = "/proc root filesystem access blocked" };
+    }
+    const string_normalized = path_normalized;
 
     // Opportunistic symlink resolution (issue #13): resolve to real path if file exists.
     // Falls back to string-normalized path for new files (Write) or permission errors.
