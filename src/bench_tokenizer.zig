@@ -1,4 +1,4 @@
-// Benchmark: tokenizer vs normalizeShellEvasion
+// Benchmark: internal processing stages
 // Run: zig build-exe -OReleaseFast src/bench_tokenizer.zig && ./bench_tokenizer
 
 const std = @import("std");
@@ -6,18 +6,12 @@ const tokenizer = @import("tokenizer.zig");
 const normalizer = @import("normalizer.zig");
 
 const test_cases = [_][]const u8{
-    // Simple
     "echo hello world",
-    // Quoted
     "echo 'hello && world > file'",
-    // Multi-segment
     "python3 -c 'import json; print(json.dumps({\"a\": 1}))' && grep -r 'pattern' src/ | head -20 && echo done",
-    // Complex real-world
     "git add src/main.zig && git commit -m 'fix: update version' && git push origin main",
-    // Long chain
     "cd /tmp && mkdir test && cd test && touch file.txt && echo 'data' > file.txt && cat file.txt && ls -la",
-    // Mixed quotes and redirects
-    "curl -s 'https://api.example.com/data' | jq '.results[]' > output.json 2>&1 && echo 'done'",
+    "if [ -f file ]; then echo exists; fi",
 };
 
 pub fn main() !void {
@@ -31,7 +25,8 @@ pub fn main() !void {
     for (test_cases) |tc| {
         var buf: [65536]u8 = undefined;
         _ = normalizer.normalizeShellEvasion(&buf, tc);
-        _ = tokenizer.tokenize(tc);
+        var buf2: [65536]u8 = undefined;
+        _ = normalizer.stripHeredocBodies(&buf2, tc);
     }
 
     // Benchmark normalizeShellEvasion
@@ -47,28 +42,43 @@ pub fn main() !void {
         const elapsed = timer.read();
         norm_total += elapsed;
         try out.print("normalizeShellEvasion: {s:.60}\n", .{tc});
-        try out.print("  {d} ns total, {d} ns/iter\n\n", .{ elapsed, elapsed / iterations });
+        try out.print("  {d} ns/iter\n\n", .{elapsed / iterations});
     }
 
-    // Benchmark tokenizer
+    // Benchmark stripHeredocBodies
+    var heredoc_total: u64 = 0;
+    for (test_cases) |tc| {
+        var timer = try std.time.Timer.start();
+        for (0..iterations) |_| {
+            var buf: [65536]u8 = undefined;
+            std.mem.doNotOptimizeAway(&buf);
+            const result = normalizer.stripHeredocBodies(&buf, tc);
+            std.mem.doNotOptimizeAway(result);
+        }
+        const elapsed = timer.read();
+        heredoc_total += elapsed;
+        try out.print("stripHeredocBodies:    {s:.60}\n", .{tc});
+        try out.print("  {d} ns/iter\n\n", .{elapsed / iterations});
+    }
+
+    // Benchmark tokenizer iterator (hasBlockedCommandPrefix)
+    const rules = @import("rules.zig");
     var tok_total: u64 = 0;
     for (test_cases) |tc| {
         var timer = try std.time.Timer.start();
         for (0..iterations) |_| {
-            const result = tokenizer.tokenize(tc);
+            const result = tokenizer.hasBlockedCommandPrefix(tc, &rules.prefix_only_commands);
             std.mem.doNotOptimizeAway(&result);
         }
         const elapsed = timer.read();
         tok_total += elapsed;
-        try out.print("tokenize: {s:.60}\n", .{tc});
-        try out.print("  {d} ns total, {d} ns/iter\n\n", .{ elapsed, elapsed / iterations });
+        try out.print("hasBlockedCommandPrefix: {s:.60}\n", .{tc});
+        try out.print("  {d} ns/iter\n\n", .{elapsed / iterations});
     }
 
-    try out.print("=== Summary ===\n", .{});
-    try out.print("normalizeShellEvasion total: {d} ns ({d} us)\n", .{ norm_total, norm_total / 1000 });
-    try out.print("tokenize total:              {d} ns ({d} us)\n", .{ tok_total, tok_total / 1000 });
-    try out.print("ratio (tokenize / normalize): {d:.2}x\n", .{@as(f64, @floatFromInt(tok_total)) / @as(f64, @floatFromInt(norm_total))});
-
-    // Memory: TokenResult is stack-allocated, print its size
-    try out.print("\nsizeof(TokenResult): {d} bytes ({d} KB)\n", .{ @sizeOf(tokenizer.TokenResult), @sizeOf(tokenizer.TokenResult) / 1024 });
+    try out.print("=== Summary (per call, averaged over {d} cases) ===\n", .{test_cases.len});
+    try out.print("normalizeShellEvasion:   {d} ns\n", .{norm_total / iterations / test_cases.len});
+    try out.print("stripHeredocBodies:      {d} ns\n", .{heredoc_total / iterations / test_cases.len});
+    try out.print("hasBlockedCommandPrefix: {d} ns\n", .{tok_total / iterations / test_cases.len});
+    try out.print("total added overhead:    {d} ns\n", .{(heredoc_total + tok_total) / iterations / test_cases.len});
 }
