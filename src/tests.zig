@@ -36,4 +36,11 @@ comptime {
     _ = @import("tests/background_operator.zig");
     _ = @import("tests/shell_keywords.zig");
     _ = @import("tests/pipe_to_interpreter.zig");
+    _ = @import("tests/tar_exec.zig");
+    _ = @import("tests/env_injection.zig");
+    _ = @import("tests/proc_root_bypass.zig");
+    _ = @import("tests/infra_admin.zig");
+    _ = @import("tests/cloud_cli_exfil.zig");
+    _ = @import("tests/webfetch_vscode.zig");
+    _ = @import("tests/pattern_expansion.zig");
 }

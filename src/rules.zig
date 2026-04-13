@@ -297,7 +297,14 @@ pub const shell_obfuscation_patterns = [_][]const u8{
 // Command options that execute arbitrary programs (Flatt Security "8 ways")
 pub const command_exec_options = [_][]const u8{
     "--compress-program", // sort/tar/rsync: executes argument as compressor
+    "--use-compress-program", // GNU tar synonym for --compress-program
     "--pager=", // git/man: executes argument as pager
+    "--to-command", // tar: passes extracted files to command via stdin (issue #51)
+    "--checkpoint-action=exec", // tar: inline form --checkpoint-action=exec=CMD (issue #51)
+    "--checkpoint-action exec", // tar: space form --checkpoint-action exec=CMD (issue #51)
+    "--info-script", // tar: volume change script execution (issue #51)
+    "--new-volume-script", // tar: volume change script execution (issue #51)
+    " -I ", // tar: short form of --use-compress-program (issue #51)
 };
 
 // man-specific dangerous options (compound: require "man " context)
@@ -331,13 +338,28 @@ pub const docker_dangerous_patterns = [_][]const u8{
     "--privileged",
     "-v /:/",
     "-v/:/",
+    // Container command execution / file transfer (issue #54)
+    " exec ",
+    " exec -",
+    " cp ",
 };
 
-// Library injection patterns (always block regardless of safe-arg)
+// Library/environment injection patterns (always block regardless of safe-arg)
 pub const lib_injection_patterns = [_][]const u8{
     "LD_PRELOAD=",
     "DYLD_INSERT_LIBRARIES=",
     "LD_LIBRARY_PATH=",
+    // Shell env var injection (issue #52): auto-sourced scripts
+    "BASH_ENV=",
+    // ENV= needs word-boundary: space prefix + segment-start variant to avoid FP with BUILD_ENV= etc.
+    " ENV=",
+    // Note: segment-start case handled by evaluator prefix check below
+    // Interpreter env var injection (issue #52): module/flag injection
+    "NODE_OPTIONS=",
+    "PERL5OPT=",
+    "RUBYOPT=",
+    "PYTHONSTARTUP=",
+    "PYTHONPATH=",
 };
 
 // Cloud metadata endpoint patterns (IMDS credential theft)
@@ -345,6 +367,7 @@ pub const cloud_metadata_patterns = [_][]const u8{
     "169.254.169.254",
     "metadata.google.internal",
     "metadata.internal/",
+    "fd00:ec2::254", // AWS IPv6 IMDS endpoint (issue #57)
 };
 
 // SSH tunneling / port forwarding flag patterns (checked after "ssh " context)
@@ -412,6 +435,22 @@ pub const prefix_only_commands = [_][]const u8{
     // Exploit frameworks (issue #22)
     "msfconsole",
     "sqlmap",
+    // Cloud CLI data transfer (issue #55) — exfiltration via cloud storage
+    "aws s3 cp",
+    "aws s3 sync",
+    "aws s3 mv",
+    "gsutil cp",
+    "gsutil rsync",
+    "az storage blob upload",
+    // GitHub CLI authenticated API calls (issue #55)
+    "gh api",
+    // Multi-cloud transfer tool (issue #55)
+    "rclone copy",
+    "rclone sync",
+    "rclone move",
+    // macOS/Linux URL/application opener (issue #57)
+    "open",
+    "xdg-open",
     // Clipboard access (issue #19) — AI agents should not read/write clipboard
     "pbpaste",
     "pbcopy",
@@ -419,6 +458,20 @@ pub const prefix_only_commands = [_][]const u8{
     "xsel",
     "wl-paste",
     "wl-copy",
+    // npx: downloads and executes arbitrary npm packages (issue #54)
+    "npx",
+    // Kubernetes admin commands (issue #54) — cluster mutation
+    "kubectl exec",
+    "kubectl apply",
+    "kubectl delete",
+    "kubectl run",
+    // Infrastructure-as-Code mutation (issue #54)
+    "terraform apply",
+    "terraform destroy",
+    "helm install",
+    "helm upgrade",
+    "pulumi up",
+    "pulumi destroy",
 };
 
 // System paths that should not be edited/written
@@ -452,9 +505,12 @@ pub const shell_config_patterns = [_][]const u8{
     // MCP configuration protection
     ".mcp.json",
     "/.cursor/rules",
-    // VSCode / IDE MCP and settings protection
+    // VSCode / IDE MCP and settings protection (IDEsaster CVE-2025-54130)
     ".vscode/mcp.json",
     ".vscode/settings.json",
+    ".vscode/tasks.json",
+    ".vscode/launch.json",
+    ".vscode/extensions.json",
     "cline_mcp_settings.json",
     "/.continue/config.json",
     // JetBrains IDE config protection (IDEsaster CVE-2025-54130)
@@ -486,6 +542,10 @@ pub const cicd_config_patterns = [_][]const u8{
     "bitbucket-pipelines.yml",
     // Terraform state (contains credentials/sensitive resource IDs)
     "terraform.tfstate",
+    // Additional CI/CD systems (issue #57)
+    ".drone.yml",
+    "/.buildkite/",
+    ".woodpecker.yml",
 };
 
 pub const env_template_suffixes = [_][]const u8{
@@ -550,6 +610,10 @@ pub const credential_literal_patterns = [_][]const u8{
     "xoxb-",         // Slack Bot Token
     "xoxp-",         // Slack User Token
     "glpat-",        // GitLab Personal Access Token
+    // Additional credential patterns (issue #57)
+    "eyJhbGciOi",    // JWT token (Base64 header: {"alg":)
+    "ya29.",         // Google OAuth access token
+    "AIza",          // Google API key
 };
 
 // Sensitive environment variable names — exfiltration via network commands (AC-2)
@@ -573,4 +637,25 @@ pub const sensitive_env_vars = [_][]const u8{
     "${GITLAB_TOKEN}",
     "${SLACK_TOKEN}",
     "${SLACK_BOT_TOKEN}",
+    // Additional service tokens (issue #57)
+    "$NPM_TOKEN",
+    "$PYPI_TOKEN",
+    "$STRIPE_SECRET_KEY",
+    "$STRIPE_API_KEY",
+    "$HEROKU_API_KEY",
+    "$DOCKER_HUB_TOKEN",
+    "$VERCEL_TOKEN",
+    "$CLOUDFLARE_API_TOKEN",
+    "$AZURE_CLIENT_SECRET",
+    "$DIGITALOCEAN_TOKEN",
+    "${NPM_TOKEN}",
+    "${PYPI_TOKEN}",
+    "${STRIPE_SECRET_KEY}",
+    "${STRIPE_API_KEY}",
+    "${HEROKU_API_KEY}",
+    "${DOCKER_HUB_TOKEN}",
+    "${VERCEL_TOKEN}",
+    "${CLOUDFLARE_API_TOKEN}",
+    "${AZURE_CLIENT_SECRET}",
+    "${DIGITALOCEAN_TOKEN}",
 };
