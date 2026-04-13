@@ -84,6 +84,10 @@ pub const reverse_shell_patterns = [_][]const u8{
 // Shell binary names — single source of truth for pipe-to-shell, process substitution, heredoc detection
 pub const shell_names = [_][]const u8{ "bash", "sh", "zsh", "dash", "fish", "ksh", "csh", "tcsh" };
 
+// Interpreter binary names — pipe-to-interpreter detection (issue #50)
+// These execute stdin as code when invoked without a script file argument.
+pub const interpreter_names = [_][]const u8{ "python", "python3", "node", "ruby", "perl", "pwsh", "php", "bun", "deno" };
+
 // Pipe-to-shell execution patterns
 pub const pipe_shell_patterns = [_][]const u8{
     "| bash",
