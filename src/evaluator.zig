@@ -32,14 +32,15 @@ fn isProcRootPath(path: []const u8) bool {
 }
 
 fn checkBashCommand(raw_command: []const u8) RuleResult {
-    // Block ANSI-C quoting early (on raw input, before normalization)
-    if (analyzer.containsPattern(raw_command, &rules.shell_obfuscation_patterns)) {
-        return .{ .decision = .deny, .reason = "shell obfuscation blocked" };
-    }
-
-    // Strip commit message FIRST (on raw input, before quote removal)
+    // Strip commit message FIRST (on raw input, before obfuscation check and quote removal)
+    // This prevents commit messages that mention obfuscation patterns from triggering FPs.
     var commit_buf: [65536]u8 = undefined;
     const commit_stripped = normalizer.stripCommitMessage(&commit_buf, raw_command);
+
+    // Block ANSI-C quoting (on commit-stripped input, before normalization)
+    if (analyzer.containsPattern(commit_stripped, &rules.shell_obfuscation_patterns)) {
+        return .{ .decision = .deny, .reason = "shell obfuscation blocked" };
+    }
 
     // Strip heredoc bodies — content between <<DELIM and DELIM is data, not commands
     var heredoc_buf: [65536]u8 = undefined;
@@ -87,7 +88,9 @@ fn checkBashCommand(raw_command: []const u8) RuleResult {
     }
 
     // File upload exfiltration — issue #5
-    if (analyzer.containsPatternSafe(command, &rules.file_upload_patterns)) {
+    // Compound: requires network command context (curl/wget) to avoid FPs with
+    // git commit -F, tar -F, etc. (issue #74)
+    if (analyzer.containsPatternSafe(command, &rules.network_commands) and analyzer.containsPattern(command, &rules.file_upload_patterns)) {
         return .{ .decision = .deny, .reason = "file upload exfiltration blocked" };
     }
 

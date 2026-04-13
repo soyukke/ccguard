@@ -87,6 +87,40 @@ test "allow grep docker privileged in docs" {
     try std.testing.expectEqual(.allow, r.decision);
 }
 
+// --- FP fix: git commit -F / --file (issue #74) ---
+
+test "allow git commit -F msgfile" {
+    const r = evaluate(.{ .tool_name = "Bash", .tool_input = .{ .command = "git commit -F /tmp/commit_msg.txt" } });
+    try std.testing.expectEqual(.allow, r.decision);
+}
+
+test "allow git commit --file msgfile" {
+    const r = evaluate(.{ .tool_name = "Bash", .tool_input = .{ .command = "git commit --file /tmp/msg.txt" } });
+    try std.testing.expectEqual(.allow, r.decision);
+}
+
+test "allow tar -f archive" {
+    const r = evaluate(.{ .tool_name = "Bash", .tool_input = .{ .command = "tar -xf archive.tar -F /usr/lib/sftp-server" } });
+    try std.testing.expectEqual(.allow, r.decision);
+}
+
+// --- FP fix: commit message with obfuscation strings (issue #75) ---
+
+test "allow git commit mentioning ansi-c hex" {
+    const r = evaluate(.{ .tool_name = "Bash", .tool_input = .{ .command = "git commit -m \"feat: block $'\\x hex quoting\"" } });
+    try std.testing.expectEqual(.allow, r.decision);
+}
+
+test "allow git commit mentioning ansi-c octal" {
+    const r = evaluate(.{ .tool_name = "Bash", .tool_input = .{ .command = "git commit -m 'fix: handle $'\\0 octal patterns'" } });
+    try std.testing.expectEqual(.allow, r.decision);
+}
+
+test "allow git commit mentioning unicode escape" {
+    const r = evaluate(.{ .tool_name = "Bash", .tool_input = .{ .command = "git commit -m \"add $'\\u unicode detection\"" } });
+    try std.testing.expectEqual(.allow, r.decision);
+}
+
 test "allow echo HISTFILE in docs" {
     const r = evaluate(.{ .tool_name = "Bash", .tool_input = .{ .command = "echo 'HISTFILE= is dangerous'" } });
     try std.testing.expectEqual(.allow, r.decision);
