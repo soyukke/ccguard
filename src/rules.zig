@@ -367,6 +367,7 @@ pub const cloud_metadata_patterns = [_][]const u8{
     "169.254.169.254",
     "metadata.google.internal",
     "metadata.internal/",
+    "fd00:ec2::254", // AWS IPv6 IMDS endpoint (issue #57)
 };
 
 // SSH tunneling / port forwarding flag patterns (checked after "ssh " context)
@@ -447,6 +448,9 @@ pub const prefix_only_commands = [_][]const u8{
     "rclone copy",
     "rclone sync",
     "rclone move",
+    // macOS/Linux URL/application opener (issue #57)
+    "open",
+    "xdg-open",
     // Clipboard access (issue #19) — AI agents should not read/write clipboard
     "pbpaste",
     "pbcopy",
@@ -538,6 +542,10 @@ pub const cicd_config_patterns = [_][]const u8{
     "bitbucket-pipelines.yml",
     // Terraform state (contains credentials/sensitive resource IDs)
     "terraform.tfstate",
+    // Additional CI/CD systems (issue #57)
+    ".drone.yml",
+    "/.buildkite/",
+    ".woodpecker.yml",
 };
 
 pub const env_template_suffixes = [_][]const u8{
@@ -602,6 +610,10 @@ pub const credential_literal_patterns = [_][]const u8{
     "xoxb-",         // Slack Bot Token
     "xoxp-",         // Slack User Token
     "glpat-",        // GitLab Personal Access Token
+    // Additional credential patterns (issue #57)
+    "eyJhbGciOi",    // JWT token (Base64 header: {"alg":)
+    "ya29.",         // Google OAuth access token
+    "AIza",          // Google API key
 };
 
 // Sensitive environment variable names — exfiltration via network commands (AC-2)
@@ -625,4 +637,25 @@ pub const sensitive_env_vars = [_][]const u8{
     "${GITLAB_TOKEN}",
     "${SLACK_TOKEN}",
     "${SLACK_BOT_TOKEN}",
+    // Additional service tokens (issue #57)
+    "$NPM_TOKEN",
+    "$PYPI_TOKEN",
+    "$STRIPE_SECRET_KEY",
+    "$STRIPE_API_KEY",
+    "$HEROKU_API_KEY",
+    "$DOCKER_HUB_TOKEN",
+    "$VERCEL_TOKEN",
+    "$CLOUDFLARE_API_TOKEN",
+    "$AZURE_CLIENT_SECRET",
+    "$DIGITALOCEAN_TOKEN",
+    "${NPM_TOKEN}",
+    "${PYPI_TOKEN}",
+    "${STRIPE_SECRET_KEY}",
+    "${STRIPE_API_KEY}",
+    "${HEROKU_API_KEY}",
+    "${DOCKER_HUB_TOKEN}",
+    "${VERCEL_TOKEN}",
+    "${CLOUDFLARE_API_TOKEN}",
+    "${AZURE_CLIENT_SECRET}",
+    "${DIGITALOCEAN_TOKEN}",
 };
