@@ -39,4 +39,5 @@ comptime {
     _ = @import("tests/tar_exec.zig");
     _ = @import("tests/env_injection.zig");
     _ = @import("tests/proc_root_bypass.zig");
+    _ = @import("tests/infra_admin.zig");
 }
