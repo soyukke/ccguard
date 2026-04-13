@@ -34,4 +34,5 @@ comptime {
     _ = @import("tests/interpreter_exec.zig");
     _ = @import("tests/self_protection.zig");
     _ = @import("tests/background_operator.zig");
+    _ = @import("tests/shell_keywords.zig");
 }

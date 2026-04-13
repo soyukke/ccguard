@@ -198,7 +198,13 @@ pub fn isSeparator(kind: TokenKind) bool {
 
 // --- Security query functions ---
 
-const transparent_prefixes = [_][]const u8{ "command", "builtin", "nohup", "time", "watch" };
+const transparent_prefixes = [_][]const u8{
+    "command", "builtin", "nohup", "time", "watch",
+    // Shell keywords that introduce command lists (not commands themselves)
+    "then", "do", "else", "elif",
+    // Pipeline negation
+    "!",
+};
 
 fn isAssignment(text: []const u8) bool {
     if (text.len == 0) return false;
