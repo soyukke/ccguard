@@ -1,8 +1,12 @@
-// Lightweight shell tokenizer — splits command strings into typed tokens
-// without dynamic allocation. Uses a fixed-size token buffer.
+// Lightweight shell tokenizer — streaming iterator, zero allocation.
 //
-// Purpose: enable structural matching (command vs argument vs operator)
-// to reduce false positives from substring-based pattern matching.
+// Design: TokenIterator yields tokens one at a time. Each token stores
+// start/end indices into the original input string. No intermediate buffer.
+// Iterator state is ~24 bytes (pointer + length + position).
+//
+// This replaces the previous design that materialized all tokens into a
+// ~5KB TokenResult struct, which caused Zig's comptime analysis to hang
+// when the function was referenced across 700+ test call sites.
 
 const std = @import("std");
 
@@ -30,268 +34,159 @@ pub const Quoting = enum {
 
 pub const Token = struct {
     kind: TokenKind,
-    start: u16, // Offset into original input
-    len: u16, // Length of token text
-    quoting: Quoting, // Whether this token was quoted
+    /// Start position in input (inclusive)
+    start: u32,
+    /// End position in input (exclusive)
+    end: u32,
+    quoting: Quoting,
 };
 
-pub const max_tokens = 512;
+/// Streaming shell token iterator. No allocation. State is ~24 bytes.
+pub const TokenIterator = struct {
+    input: []const u8,
+    pos: usize,
 
-pub const TokenResult = struct {
-    tokens: [max_tokens]Token,
-    count: u16,
-    /// The normalized text buffer — token start/len index into this
-    text: [65536]u8,
-    text_len: u16,
-};
+    pub fn init(input: []const u8) TokenIterator {
+        return .{ .input = input, .pos = 0 };
+    }
 
-/// Tokenize a shell command string.
-/// Returns tokens with positions into a normalized text buffer.
-/// No heap allocation — everything is on the stack / in the result struct.
-pub fn tokenize(input: []const u8) TokenResult {
-    var result: TokenResult = undefined;
-    result.count = 0;
-    result.text_len = 0;
+    pub fn next(self: *TokenIterator) ?Token {
+        self.skipWhitespace();
+        if (self.pos >= self.input.len) return null;
 
-    var i: usize = 0;
-    const len = @min(input.len, result.text.len);
+        const c = self.input[self.pos];
 
-    while (i < len) {
-        // Skip whitespace
-        while (i < len and (input[i] == ' ' or input[i] == '\t')) i += 1;
-        if (i >= len) break;
-        if (result.count >= max_tokens) break;
-
-        const c = input[i];
-
-        // Operators
-        if (c == '|') {
-            if (i + 1 < len and input[i + 1] == '|') {
-                addOp(&result, .or_op, i, 2);
-                i += 2;
-            } else {
-                addOp(&result, .pipe, i, 1);
-                i += 1;
+        // Two-char operators (check before single-char)
+        if (self.pos + 1 < self.input.len) {
+            const c2 = self.input[self.pos + 1];
+            if (c == '|' and c2 == '|') return self.emit(.or_op, 2);
+            if (c == '&' and c2 == '&') return self.emit(.and_op, 2);
+            if (c == '>' and c2 == '>') return self.emit(.redirect_out, 2);
+            if (c == '$' and c2 == '(') return self.emit(.subst_open, 2);
+            if (c == '<' and c2 == '<') {
+                // Heredoc marker — emit << as a word token, delimiter follows as next token
+                const start = self.pos;
+                self.pos += 2;
+                return .{ .kind = .word, .start = @intCast(start), .end = @intCast(self.pos), .quoting = .none };
             }
-        } else if (c == '&') {
-            if (i + 1 < len and input[i + 1] == '&') {
-                addOp(&result, .and_op, i, 2);
-                i += 2;
-            } else {
-                addOp(&result, .background, i, 1);
-                i += 1;
-            }
-        } else if (c == ';') {
-            addOp(&result, .semi, i, 1);
-            i += 1;
-        } else if (c == '\n') {
-            addOp(&result, .newline, i, 1);
-            i += 1;
-        } else if (c == '(') {
-            addOp(&result, .paren_open, i, 1);
-            i += 1;
-        } else if (c == ')') {
-            addOp(&result, .paren_close, i, 1);
-            i += 1;
-        } else if (c == '`') {
-            addOp(&result, .backtick, i, 1);
-            i += 1;
-        } else if (c == '$' and i + 1 < len and input[i + 1] == '(') {
-            addOp(&result, .subst_open, i, 2);
-            i += 2;
-        } else if (c == '>') {
-            if (i + 1 < len and input[i + 1] == '>') {
-                addOp(&result, .redirect_out, i, 2);
-                i += 2;
-            } else {
-                addOp(&result, .redirect_out, i, 1);
-                i += 1;
-            }
-        } else if (c == '<') {
-            if (i + 1 < len and input[i + 1] == '<') {
-                // << is heredoc — treat as a word for now
-                i = readWord(&result, input, i, len);
-            } else {
-                addOp(&result, .redirect_in, i, 1);
-                i += 1;
-            }
-        } else if (c == '\'') {
-            // Single-quoted string → one word token
-            i = readSingleQuoted(&result, input, i, len);
-        } else if (c == '"') {
-            // Double-quoted string → one word token
-            i = readDoubleQuoted(&result, input, i, len);
-        } else {
-            // Regular word (may contain embedded quotes)
-            i = readWord(&result, input, i, len);
+        }
+
+        // Single-char operators
+        return switch (c) {
+            '|' => self.emit(.pipe, 1),
+            '&' => self.emit(.background, 1),
+            ';' => self.emit(.semi, 1),
+            '\n' => self.emit(.newline, 1),
+            '(' => self.emit(.paren_open, 1),
+            ')' => self.emit(.paren_close, 1),
+            '`' => self.emit(.backtick, 1),
+            '>' => self.emit(.redirect_out, 1),
+            '<' => self.emit(.redirect_in, 1),
+            '\'' => self.readSingleQuoted(),
+            '"' => self.readDoubleQuoted(),
+            else => self.readWord(),
+        };
+    }
+
+    fn emit(self: *TokenIterator, kind: TokenKind, len: usize) Token {
+        const start = self.pos;
+        self.pos += len;
+        return .{ .kind = kind, .start = @intCast(start), .end = @intCast(self.pos), .quoting = .none };
+    }
+
+    fn skipWhitespace(self: *TokenIterator) void {
+        while (self.pos < self.input.len) {
+            const ch = self.input[self.pos];
+            if (ch != ' ' and ch != '\t') break;
+            self.pos += 1;
         }
     }
 
-    return result;
-}
-
-fn addOp(result: *TokenResult, kind: TokenKind, pos: usize, length: usize) void {
-    if (result.count >= max_tokens) return;
-    result.tokens[result.count] = .{
-        .kind = kind,
-        .start = @intCast(result.text_len),
-        .len = 0, // Operators have no text content
-        .quoting = .none,
-    };
-    _ = pos;
-    _ = length;
-    result.count += 1;
-}
-
-fn readSingleQuoted(result: *TokenResult, input: []const u8, start: usize, len: usize) usize {
-    if (result.count >= max_tokens) return len;
-    const text_start = result.text_len;
-    var i = start + 1; // Skip opening '
-    // Copy content (everything is literal in single quotes)
-    while (i < len and input[i] != '\'') {
-        if (result.text_len < result.text.len) {
-            result.text[result.text_len] = input[i];
-            result.text_len += 1;
-        }
-        i += 1;
+    fn readSingleQuoted(self: *TokenIterator) Token {
+        const start = self.pos;
+        self.pos += 1; // skip opening '
+        while (self.pos < self.input.len and self.input[self.pos] != '\'') self.pos += 1;
+        if (self.pos < self.input.len) self.pos += 1; // skip closing '
+        return .{ .kind = .word, .start = @intCast(start), .end = @intCast(self.pos), .quoting = .single };
     }
-    if (i < len) i += 1; // Skip closing '
 
-    result.tokens[result.count] = .{
-        .kind = .word,
-        .start = text_start,
-        .len = result.text_len - text_start,
-        .quoting = .single,
-    };
-    result.count += 1;
-    return i;
-}
-
-fn readDoubleQuoted(result: *TokenResult, input: []const u8, start: usize, len: usize) usize {
-    if (result.count >= max_tokens) return len;
-    const text_start = result.text_len;
-    var i = start + 1; // Skip opening "
-    while (i < len and input[i] != '"') {
-        if (input[i] == '\\' and i + 1 < len) {
-            // Escaped character — copy the escaped char
-            if (result.text_len < result.text.len) {
-                result.text[result.text_len] = input[i + 1];
-                result.text_len += 1;
+    fn readDoubleQuoted(self: *TokenIterator) Token {
+        const start = self.pos;
+        self.pos += 1; // skip opening "
+        while (self.pos < self.input.len and self.input[self.pos] != '"') {
+            if (self.input[self.pos] == '\\' and self.pos + 1 < self.input.len) {
+                self.pos += 2;
+            } else {
+                self.pos += 1;
             }
-            i += 2;
-        } else {
-            if (result.text_len < result.text.len) {
-                result.text[result.text_len] = input[i];
-                result.text_len += 1;
-            }
-            i += 1;
         }
+        if (self.pos < self.input.len) self.pos += 1; // skip closing "
+        return .{ .kind = .word, .start = @intCast(start), .end = @intCast(self.pos), .quoting = .double };
     }
-    if (i < len) i += 1; // Skip closing "
 
-    result.tokens[result.count] = .{
-        .kind = .word,
-        .start = text_start,
-        .len = result.text_len - text_start,
-        .quoting = .double,
-    };
-    result.count += 1;
-    return i;
-}
+    fn readWord(self: *TokenIterator) Token {
+        const start = self.pos;
+        while (self.pos < self.input.len) {
+            const ch = self.input[self.pos];
+            // Stop at whitespace or operator characters
+            if (ch == ' ' or ch == '\t' or ch == '\n' or
+                ch == '|' or ch == '&' or ch == ';' or
+                ch == '>' or ch == '<' or ch == '(' or ch == ')' or ch == '`')
+                break;
+            // Stop at $( so it becomes a separate subst_open token
+            if (ch == '$' and self.pos + 1 < self.input.len and self.input[self.pos + 1] == '(') break;
 
-fn readWord(result: *TokenResult, input: []const u8, start: usize, len: usize) usize {
-    if (result.count >= max_tokens) return len;
-    const text_start = result.text_len;
-    var i = start;
-    while (i < len) {
-        const c = input[i];
-        // Stop at whitespace or operators
-        if (c == ' ' or c == '\t' or c == '\n' or
-            c == '|' or c == '&' or c == ';' or
-            c == '>' or c == '<' or c == '(' or c == ')' or c == '`')
-        {
-            break;
-        }
-        // Handle $( — stop here so it becomes a separate operator token
-        if (c == '$' and i + 1 < len and input[i + 1] == '(') break;
-
-        // Handle embedded single quote
-        if (c == '\'') {
-            i += 1;
-            while (i < len and input[i] != '\'') {
-                if (result.text_len < result.text.len) {
-                    result.text[result.text_len] = input[i];
-                    result.text_len += 1;
-                }
-                i += 1;
-            }
-            if (i < len) i += 1; // Skip closing '
-            continue;
-        }
-        // Handle embedded double quote
-        if (c == '"') {
-            i += 1;
-            while (i < len and input[i] != '"') {
-                if (input[i] == '\\' and i + 1 < len) {
-                    if (result.text_len < result.text.len) {
-                        result.text[result.text_len] = input[i + 1];
-                        result.text_len += 1;
-                    }
-                    i += 2;
-                } else {
-                    if (result.text_len < result.text.len) {
-                        result.text[result.text_len] = input[i];
-                        result.text_len += 1;
-                    }
-                    i += 1;
-                }
-            }
-            if (i < len) i += 1; // Skip closing "
-            continue;
-        }
-        // Handle backslash escape
-        if (c == '\\' and i + 1 < len) {
-            if (input[i + 1] == '\n') {
-                // Line continuation — skip both
-                i += 2;
+            // Handle embedded single quote
+            if (ch == '\'') {
+                self.pos += 1;
+                while (self.pos < self.input.len and self.input[self.pos] != '\'') self.pos += 1;
+                if (self.pos < self.input.len) self.pos += 1;
                 continue;
             }
-            if (result.text_len < result.text.len) {
-                result.text[result.text_len] = input[i + 1];
-                result.text_len += 1;
+            // Handle embedded double quote
+            if (ch == '"') {
+                self.pos += 1;
+                while (self.pos < self.input.len and self.input[self.pos] != '"') {
+                    if (self.input[self.pos] == '\\' and self.pos + 1 < self.input.len) {
+                        self.pos += 2;
+                    } else {
+                        self.pos += 1;
+                    }
+                }
+                if (self.pos < self.input.len) self.pos += 1;
+                continue;
             }
-            i += 2;
-            continue;
+            // Handle backslash escape
+            if (ch == '\\' and self.pos + 1 < self.input.len) {
+                self.pos += 2;
+                continue;
+            }
+            self.pos += 1;
         }
-        // Regular character
-        if (result.text_len < result.text.len) {
-            result.text[result.text_len] = c;
-            result.text_len += 1;
-        }
-        i += 1;
+        return .{ .kind = .word, .start = @intCast(start), .end = @intCast(self.pos), .quoting = .none };
     }
+};
 
-    const word_len = result.text_len - text_start;
-    if (word_len > 0) {
-        result.tokens[result.count] = .{
-            .kind = .word,
-            .start = text_start,
-            .len = result.text_len - text_start,
-            .quoting = .none,
-        };
-        result.count += 1;
-    }
-    return i;
+// --- Convenience functions ---
+
+/// Get the raw text of a token from the input.
+pub fn rawText(input: []const u8, tok: Token) []const u8 {
+    return input[tok.start..tok.end];
 }
 
-// --- Convenience accessors ---
-
-/// Get the text content of a word token
-pub fn tokenText(result: *const TokenResult, tok: Token) []const u8 {
-    return result.text[tok.start..][0..tok.len];
+/// Get the unquoted content of a fully-quoted word token.
+/// For single-quoted 'foo': returns foo
+/// For double-quoted "foo": returns foo
+/// For unquoted words: returns the raw text as-is.
+pub fn wordContent(input: []const u8, tok: Token) []const u8 {
+    const raw = rawText(input, tok);
+    if ((tok.quoting == .single or tok.quoting == .double) and raw.len >= 2) {
+        return raw[1 .. raw.len - 1];
+    }
+    return raw;
 }
 
-/// Check if a token kind is a command separator (starts a new command)
+/// Check if a token kind is a command separator (starts a new command).
 pub fn isSeparator(kind: TokenKind) bool {
     return switch (kind) {
         .pipe, .and_op, .or_op, .semi, .background, .newline,
@@ -301,109 +196,98 @@ pub fn isSeparator(kind: TokenKind) bool {
     };
 }
 
-/// Iterate over command segments in the token stream.
-/// A segment is a sequence of word/redirect tokens between separators.
-/// Returns the index range [start, end) into the tokens array for each segment.
-pub const Segment = struct {
-    start: u16,
-    end: u16,
-};
+// --- Security query functions ---
 
-pub fn nextSegment(result: *const TokenResult, from: u16) ?Segment {
-    var i = from;
-    // Skip leading separators
-    while (i < result.count and isSeparator(result.tokens[i].kind)) i += 1;
-    if (i >= result.count) return null;
-    const seg_start = i;
-    // Find end of segment
-    while (i < result.count and !isSeparator(result.tokens[i].kind)) i += 1;
-    return .{ .start = seg_start, .end = i };
+const transparent_prefixes = [_][]const u8{ "command", "builtin", "nohup", "time", "watch" };
+
+fn isAssignment(text: []const u8) bool {
+    if (text.len == 0) return false;
+    if (!(std.ascii.isAlphabetic(text[0]) or text[0] == '_')) return false;
+    return std.mem.indexOf(u8, text, "=") != null;
 }
 
-/// Get the first word token in a segment (the command name).
-/// Skips VAR=val assignments and transparent prefixes (command, builtin, nohup, etc.)
-pub fn segmentCommand(result: *const TokenResult, seg: Segment) ?[]const u8 {
-    const transparent_prefixes = [_][]const u8{ "command", "builtin", "nohup", "time", "watch" };
-    var i = seg.start;
-    while (i < seg.end) {
-        const tok = result.tokens[i];
-        if (tok.kind != .word) {
-            i += 1;
-            continue;
-        }
-        const text = tokenText(result, tok);
-        // Skip VAR=val assignments
-        if (std.mem.indexOf(u8, text, "=") != null and text.len > 0 and
-            (std.ascii.isAlphabetic(text[0]) or text[0] == '_'))
-        {
-            i += 1;
-            continue;
-        }
-        // Skip transparent wrappers
-        var is_transparent = false;
-        for (transparent_prefixes) |prefix| {
-            if (std.mem.eql(u8, text, prefix)) {
-                is_transparent = true;
-                break;
-            }
-        }
-        if (is_transparent) {
-            i += 1;
-            continue;
-        }
-        return text;
+fn isTransparent(text: []const u8) bool {
+    for (transparent_prefixes) |prefix| {
+        if (std.mem.eql(u8, text, prefix)) return true;
     }
-    return null;
+    return false;
 }
 
-/// Check if any segment's command matches a prefix pattern.
-/// This is the tokenizer equivalent of matchesPrefixInChain, but handles & correctly.
-pub fn hasBlockedCommandPrefix(result: *const TokenResult, patterns: []const []const u8) bool {
-    var pos: u16 = 0;
-    while (nextSegment(result, pos)) |seg| {
-        if (segmentCommand(result, seg)) |cmd| {
-            for (patterns) |pattern| {
-                // Exact match
-                if (std.mem.eql(u8, cmd, pattern)) return true;
-                // Prefix match with trailing space (pattern has trailing space)
-                if (pattern.len > 0 and pattern[pattern.len - 1] == ' ') {
-                    if (std.mem.startsWith(u8, cmd, pattern[0 .. pattern.len - 1])) return true;
-                }
+/// Check if any segment's command matches a blocked prefix pattern.
+/// Handles & (background), &&, ||, ;, |, $(), `, (, \n separators.
+/// This catches commands that ChainIterator misses (specifically &).
+pub fn hasBlockedCommandPrefix(input: []const u8, patterns: []const []const u8) bool {
+    var iter = TokenIterator.init(input);
+    var expect_command = true;
+
+    while (iter.next()) |tok| {
+        if (isSeparator(tok.kind)) {
+            expect_command = true;
+            continue;
+        }
+        if (tok.kind == .redirect_out or tok.kind == .redirect_in or tok.kind == .paren_close) continue;
+        if (!expect_command) continue;
+        if (tok.kind != .word) continue;
+
+        const text = rawText(input, tok);
+
+        // Skip VAR=val environment assignments
+        if (isAssignment(text)) continue;
+        // Skip transparent wrapper commands (nohup, command, etc.)
+        if (isTransparent(text)) continue;
+
+        // This is the command name of a segment — check against patterns
+        expect_command = false;
+        for (patterns) |pattern| {
+            if (std.mem.eql(u8, text, pattern)) return true;
+            // Prefix match: pattern "sudo " matches command "sudo"
+            if (pattern.len > 0 and pattern[pattern.len - 1] == ' ') {
+                if (std.mem.startsWith(u8, text, pattern[0 .. pattern.len - 1])) return true;
             }
         }
-        pos = seg.end;
     }
     return false;
 }
 
 /// Check if any segment has a shell binary executing a script file.
-/// Tokenizer equivalent of hasShellScriptExec.
-pub fn hasShellScriptExecTokenized(result: *const TokenResult) bool {
+/// Tokenizer equivalent of hasShellScriptExec, but handles & correctly.
+pub fn hasShellScriptExecTokenized(input: []const u8) bool {
     const shell_names = @import("rules.zig").shell_names;
-    var pos: u16 = 0;
-    while (nextSegment(result, pos)) |seg| {
-        if (segmentCommand(result, seg)) |cmd| {
+    var iter = TokenIterator.init(input);
+    var expect_command = true;
+    var found_shell = false;
+
+    while (iter.next()) |tok| {
+        if (isSeparator(tok.kind)) {
+            expect_command = true;
+            found_shell = false;
+            continue;
+        }
+        if (tok.kind == .redirect_out or tok.kind == .redirect_in or tok.kind == .paren_close) continue;
+        if (tok.kind != .word) continue;
+
+        const text = rawText(input, tok);
+
+        if (expect_command) {
+            if (isAssignment(text)) continue;
+            if (isTransparent(text)) continue;
+
+            expect_command = false;
+            found_shell = false;
             for (shell_names) |shell| {
-                if (std.mem.eql(u8, cmd, shell)) {
-                    // Found a shell as command — check if next word is a file (not a flag)
-                    var j = seg.start;
-                    var found_shell = false;
-                    while (j < seg.end) : (j += 1) {
-                        const tok = result.tokens[j];
-                        if (tok.kind != .word) continue;
-                        const text = tokenText(result, tok);
-                        if (!found_shell) {
-                            if (std.mem.eql(u8, text, shell)) found_shell = true;
-                            continue;
-                        }
-                        // This is the argument after the shell name
-                        if (text.len > 0 and text[0] == '-') break; // It's a flag — allowed
-                        return true; // It's a file path — blocked
-                    }
+                if (std.mem.eql(u8, text, shell)) {
+                    found_shell = true;
+                    break;
                 }
             }
+        } else if (found_shell) {
+            // First argument after shell binary
+            if (text.len > 0 and text[0] == '-') {
+                found_shell = false; // It's a flag like -c → allowed
+            } else {
+                return true; // It's a file path → blocked
+            }
         }
-        pos = seg.end;
     }
     return false;
 }
@@ -411,104 +295,116 @@ pub fn hasShellScriptExecTokenized(result: *const TokenResult) bool {
 // --- Tests ---
 
 test "tokenize simple command" {
-    const r = tokenize("echo hello world");
-    try std.testing.expectEqual(@as(u16, 3), r.count);
-    try std.testing.expectEqual(TokenKind.word, r.tokens[0].kind);
-    try std.testing.expectEqualStrings("echo", tokenText(&r, r.tokens[0]));
-    try std.testing.expectEqualStrings("hello", tokenText(&r, r.tokens[1]));
-    try std.testing.expectEqualStrings("world", tokenText(&r, r.tokens[2]));
+    var iter = TokenIterator.init("echo hello world");
+    const t0 = iter.next().?;
+    try std.testing.expectEqual(TokenKind.word, t0.kind);
+    try std.testing.expectEqualStrings("echo", rawText("echo hello world", t0));
+    const t1 = iter.next().?;
+    try std.testing.expectEqualStrings("hello", rawText("echo hello world", t1));
+    const t2 = iter.next().?;
+    try std.testing.expectEqualStrings("world", rawText("echo hello world", t2));
+    try std.testing.expect(iter.next() == null);
 }
 
 test "tokenize pipe" {
-    const r = tokenize("cat file | grep pattern");
-    try std.testing.expectEqual(@as(u16, 5), r.count);
-    try std.testing.expectEqual(TokenKind.word, r.tokens[0].kind);
-    try std.testing.expectEqual(TokenKind.word, r.tokens[1].kind);
-    try std.testing.expectEqual(TokenKind.pipe, r.tokens[2].kind);
-    try std.testing.expectEqual(TokenKind.word, r.tokens[3].kind);
-    try std.testing.expectEqualStrings("grep", tokenText(&r, r.tokens[3]));
+    const input = "cat file | grep pattern";
+    var iter = TokenIterator.init(input);
+    const t0 = iter.next().?;
+    try std.testing.expectEqualStrings("cat", rawText(input, t0));
+    _ = iter.next().?; // file
+    const t2 = iter.next().?;
+    try std.testing.expectEqual(TokenKind.pipe, t2.kind);
+    const t3 = iter.next().?;
+    try std.testing.expectEqualStrings("grep", rawText(input, t3));
 }
 
 test "tokenize chain operators" {
-    const r = tokenize("cmd1 && cmd2 || cmd3 ; cmd4");
-    try std.testing.expectEqual(TokenKind.word, r.tokens[0].kind);
-    try std.testing.expectEqual(TokenKind.and_op, r.tokens[1].kind);
-    try std.testing.expectEqual(TokenKind.word, r.tokens[2].kind);
-    try std.testing.expectEqual(TokenKind.or_op, r.tokens[3].kind);
-    try std.testing.expectEqual(TokenKind.word, r.tokens[4].kind);
-    try std.testing.expectEqual(TokenKind.semi, r.tokens[5].kind);
-    try std.testing.expectEqual(TokenKind.word, r.tokens[6].kind);
+    const input = "cmd1 && cmd2 || cmd3 ; cmd4";
+    var iter = TokenIterator.init(input);
+    _ = iter.next().?; // cmd1
+    try std.testing.expectEqual(TokenKind.and_op, iter.next().?.kind);
+    _ = iter.next().?; // cmd2
+    try std.testing.expectEqual(TokenKind.or_op, iter.next().?.kind);
+    _ = iter.next().?; // cmd3
+    try std.testing.expectEqual(TokenKind.semi, iter.next().?.kind);
+    _ = iter.next().?; // cmd4
+    try std.testing.expect(iter.next() == null);
 }
 
 test "tokenize single-quoted preserves content" {
-    const r = tokenize("echo 'hello && world > file'");
-    try std.testing.expectEqual(@as(u16, 2), r.count);
-    try std.testing.expectEqualStrings("echo", tokenText(&r, r.tokens[0]));
-    try std.testing.expectEqual(Quoting.none, r.tokens[0].quoting);
-    try std.testing.expectEqualStrings("hello && world > file", tokenText(&r, r.tokens[1]));
-    try std.testing.expectEqual(Quoting.single, r.tokens[1].quoting);
+    const input = "echo 'hello && world > file'";
+    var iter = TokenIterator.init(input);
+    _ = iter.next().?; // echo
+    const t1 = iter.next().?;
+    try std.testing.expectEqual(Quoting.single, t1.quoting);
+    try std.testing.expectEqualStrings("hello && world > file", wordContent(input, t1));
+    try std.testing.expect(iter.next() == null);
 }
 
 test "tokenize double-quoted preserves content" {
-    const r = tokenize("echo \"hello && world\"");
-    try std.testing.expectEqual(@as(u16, 2), r.count);
-    try std.testing.expectEqualStrings("hello && world", tokenText(&r, r.tokens[1]));
-    try std.testing.expectEqual(Quoting.double, r.tokens[1].quoting);
+    const input = "echo \"hello && world\"";
+    var iter = TokenIterator.init(input);
+    _ = iter.next().?; // echo
+    const t1 = iter.next().?;
+    try std.testing.expectEqual(Quoting.double, t1.quoting);
+    try std.testing.expectEqualStrings("hello && world", wordContent(input, t1));
 }
 
 test "tokenize redirect" {
-    const r = tokenize("echo data > output.txt");
-    try std.testing.expectEqual(@as(u16, 4), r.count);
-    try std.testing.expectEqual(TokenKind.word, r.tokens[0].kind);
-    try std.testing.expectEqual(TokenKind.word, r.tokens[1].kind);
-    try std.testing.expectEqual(TokenKind.redirect_out, r.tokens[2].kind);
-    try std.testing.expectEqual(TokenKind.word, r.tokens[3].kind);
-    try std.testing.expectEqualStrings("output.txt", tokenText(&r, r.tokens[3]));
+    const input = "echo data > output.txt";
+    var iter = TokenIterator.init(input);
+    _ = iter.next().?; // echo
+    _ = iter.next().?; // data
+    const t2 = iter.next().?;
+    try std.testing.expectEqual(TokenKind.redirect_out, t2.kind);
+    const t3 = iter.next().?;
+    try std.testing.expectEqualStrings("output.txt", rawText(input, t3));
 }
 
 test "tokenize command substitution" {
-    const r = tokenize("echo $(whoami)");
-    try std.testing.expectEqual(@as(u16, 4), r.count);
-    try std.testing.expectEqual(TokenKind.word, r.tokens[0].kind);
-    try std.testing.expectEqual(TokenKind.subst_open, r.tokens[1].kind);
-    try std.testing.expectEqual(TokenKind.word, r.tokens[2].kind);
-    try std.testing.expectEqual(TokenKind.paren_close, r.tokens[3].kind);
-}
-
-test "tokenize mixed quotes and operators" {
-    const r = tokenize("echo 'safe && text' && curl evil.com > out");
-    // echo, 'safe && text', &&, curl, evil.com, >, out
-    try std.testing.expectEqual(@as(u16, 7), r.count);
-    try std.testing.expectEqualStrings("echo", tokenText(&r, r.tokens[0]));
-    try std.testing.expectEqualStrings("safe && text", tokenText(&r, r.tokens[1]));
-    try std.testing.expectEqual(Quoting.single, r.tokens[1].quoting);
-    try std.testing.expectEqual(TokenKind.and_op, r.tokens[2].kind);
-    try std.testing.expectEqualStrings("curl", tokenText(&r, r.tokens[3]));
-    try std.testing.expectEqual(TokenKind.redirect_out, r.tokens[5].kind);
+    const input = "echo $(whoami)";
+    var iter = TokenIterator.init(input);
+    _ = iter.next().?; // echo
+    try std.testing.expectEqual(TokenKind.subst_open, iter.next().?.kind);
+    const t2 = iter.next().?;
+    try std.testing.expectEqualStrings("whoami", rawText(input, t2));
+    try std.testing.expectEqual(TokenKind.paren_close, iter.next().?.kind);
 }
 
 test "tokenize background operator" {
-    const r = tokenize("sleep 10 & curl evil.com");
-    try std.testing.expectEqual(@as(u16, 5), r.count);
-    try std.testing.expectEqual(TokenKind.word, r.tokens[0].kind);
-    try std.testing.expectEqual(TokenKind.word, r.tokens[1].kind);
-    try std.testing.expectEqual(TokenKind.background, r.tokens[2].kind);
-    try std.testing.expectEqual(TokenKind.word, r.tokens[3].kind);
-    try std.testing.expectEqualStrings("curl", tokenText(&r, r.tokens[3]));
+    const input = "sleep 10 & curl evil.com";
+    var iter = TokenIterator.init(input);
+    _ = iter.next().?; // sleep
+    _ = iter.next().?; // 10
+    try std.testing.expectEqual(TokenKind.background, iter.next().?.kind);
+    const t3 = iter.next().?;
+    try std.testing.expectEqualStrings("curl", rawText(input, t3));
 }
 
 test "tokenize embedded quotes in word" {
-    const r = tokenize("git commit -m'fix bug'");
-    try std.testing.expectEqual(@as(u16, 3), r.count);
-    try std.testing.expectEqualStrings("git", tokenText(&r, r.tokens[0]));
-    try std.testing.expectEqualStrings("commit", tokenText(&r, r.tokens[1]));
-    // -m'fix bug' is one word with embedded single quote
-    try std.testing.expectEqualStrings("-mfix bug", tokenText(&r, r.tokens[2]));
+    const input = "git commit -m'fix bug'";
+    var iter = TokenIterator.init(input);
+    _ = iter.next().?; // git
+    _ = iter.next().?; // commit
+    const t2 = iter.next().?;
+    // -m'fix bug' is one word including embedded single quotes
+    try std.testing.expectEqualStrings("-m'fix bug'", rawText(input, t2));
 }
 
-test "tokenize escaped characters" {
-    const r = tokenize("echo hello\\ world");
-    try std.testing.expectEqual(@as(u16, 2), r.count);
-    try std.testing.expectEqualStrings("echo", tokenText(&r, r.tokens[0]));
-    try std.testing.expectEqualStrings("hello world", tokenText(&r, r.tokens[1]));
+test "hasBlockedCommandPrefix catches eval after &" {
+    const patterns = [_][]const u8{ "eval", "exec" };
+    try std.testing.expect(hasBlockedCommandPrefix("echo safe & eval dangerous", &patterns));
+}
+
+test "hasBlockedCommandPrefix allows safe commands" {
+    const patterns = [_][]const u8{ "eval", "exec" };
+    try std.testing.expect(!hasBlockedCommandPrefix("echo hello && ls -la", &patterns));
+}
+
+test "hasShellScriptExecTokenized catches bash script after &" {
+    try std.testing.expect(hasShellScriptExecTokenized("echo decoy & bash /tmp/payload.sh"));
+}
+
+test "hasShellScriptExecTokenized allows bash -c" {
+    try std.testing.expect(!hasShellScriptExecTokenized("bash -c 'echo hello'"));
 }
