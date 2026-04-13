@@ -265,7 +265,8 @@ test "allow Read .continue/config.json" {
 }
 
 test "allow Write normal .json in .vscode" {
-    const r = evaluate(.{ .tool_name = "Write", .tool_input = .{ .file_path = "/home/user/project/.vscode/launch.json" } });
+    // Custom config files in .vscode are allowed; only specific security-sensitive files are blocked
+    const r = evaluate(.{ .tool_name = "Write", .tool_input = .{ .file_path = "/home/user/project/.vscode/my-config.json" } });
     try std.testing.expectEqual(.allow, r.decision);
 }
 

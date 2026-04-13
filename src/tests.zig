@@ -41,4 +41,5 @@ comptime {
     _ = @import("tests/proc_root_bypass.zig");
     _ = @import("tests/infra_admin.zig");
     _ = @import("tests/cloud_cli_exfil.zig");
+    _ = @import("tests/webfetch_vscode.zig");
 }

@@ -8,6 +8,7 @@ pub const HookInput = struct {
 pub const ToolInput = struct {
     command: ?[]const u8 = null,
     file_path: ?[]const u8 = null,
+    url: ?[]const u8 = null,
 };
 
 pub const Decision = enum {
