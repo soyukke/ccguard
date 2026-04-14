@@ -24,6 +24,21 @@ just validate  # Plugin metadata + version consistency check (mirrors CI)
 just bench     # Benchmark all rule categories
 ```
 
+### Release Workflow
+
+```bash
+just bump patch              # Version bump (build.zig.zon, plugin.json, main.zig の3箇所を一括更新)
+just validate                # バージョン整合性チェック
+# commit, PR, merge, then:
+git tag v0.X.Y && git push origin v0.X.Y
+gh release create v0.X.Y --title "v0.X.Y" --notes "..."
+```
+
+バージョンは以下の3箇所で管理。`just bump`で一括更新されるので手動で個別編集しない:
+- `build.zig.zon` — `.version`
+- `.claude-plugin/plugin.json` — `"version"`
+- `src/main.zig` — `ccguard X.Y.Z` (version subcommand output)
+
 ## Architecture
 
 ### Module Structure
