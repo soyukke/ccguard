@@ -37,14 +37,18 @@ fn checkBashCommand(raw_command: []const u8) RuleResult {
     var commit_buf: [65536]u8 = undefined;
     const commit_stripped = normalizer.stripCommitMessage(&commit_buf, raw_command);
 
-    // Block ANSI-C quoting (on commit-stripped input, before normalization)
-    if (analyzer.containsPattern(commit_stripped, &rules.shell_obfuscation_patterns)) {
+    // Strip gh --body/--title/--notes text args (same rationale as commit message)
+    var gh_buf: [65536]u8 = undefined;
+    const gh_stripped = normalizer.stripGhTextArgs(&gh_buf, commit_stripped);
+
+    // Block ANSI-C quoting (on stripped input, before normalization)
+    if (analyzer.containsPattern(gh_stripped, &rules.shell_obfuscation_patterns)) {
         return .{ .decision = .deny, .reason = "shell obfuscation blocked" };
     }
 
     // Strip heredoc bodies — content between <<DELIM and DELIM is data, not commands
     var heredoc_buf: [65536]u8 = undefined;
-    const heredoc_stripped = normalizer.stripHeredocBodies(&heredoc_buf, commit_stripped);
+    const heredoc_stripped = normalizer.stripHeredocBodies(&heredoc_buf, gh_stripped);
 
     // Then normalize shell evasion patterns
     var norm_buf: [65536]u8 = undefined;

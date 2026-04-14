@@ -430,12 +430,80 @@ fn messageContainsExpansion(msg: []const u8) bool {
     // Single-quoted messages: all content is literal, no expansion possible
     if (msg[start] == '\'') return false;
 
-    // Double-quoted or unquoted: check for $() or backtick
+    // Double-quoted or unquoted: check for command substitution syntax.
+    // $() and backtick execute code; $VAR is value-only expansion handled
+    // by sensitive_env_vars rules, not at the stripping layer.
     for (start..msg.len) |i| {
         if (msg[i] == '`') return true;
         if (msg[i] == '$' and i + 1 < msg.len and msg[i + 1] == '(') return true;
     }
     return false;
+}
+
+// CLI text flags whose values are user-provided text data.
+const cli_text_flags = [_][]const u8{ "--body", "--title", "--notes" };
+
+/// Find any of the given long flags within [search_start, search_end).
+/// Matches: " --flag ", " --flag=", " --flag\"", " --flag'"
+fn findLongTextFlag(command: []const u8, search_start: usize, search_end: usize, flags: []const []const u8) ?FlagMatch {
+    var i = search_start;
+    while (i < search_end) {
+        if (command[i] != ' ') {
+            i += 1;
+            continue;
+        }
+        // command[i] == ' '
+        for (flags) |flag| {
+            if (i + 1 + flag.len > search_end) continue;
+            if (!std.mem.eql(u8, command[i + 1 .. i + 1 + flag.len], flag)) continue;
+            const after = i + 1 + flag.len;
+            if (after >= search_end) return .{ .flag_start = i, .val_start = after };
+            const c = command[after];
+            if (c == '=') return .{ .flag_start = i, .val_start = after + 1 };
+            if (c == ' ' or c == '"' or c == '\'') return .{ .flag_start = i, .val_start = after };
+        }
+        i += 1;
+    }
+    return null;
+}
+
+pub fn stripGhTextArgs(buf: []u8, command: []const u8) []const u8 {
+    // Strip --body/--title/--notes content from gh commands.
+    // These are user-provided text data (PR descriptions, issue titles, etc.)
+    // that should not trigger security pattern matching.
+    const result = stripOneGhTextArg(buf, command);
+    // Handle multiple text flags: gh pr create --title "..." --body "..."
+    if (result.ptr != command.ptr) {
+        var buf2: [65536]u8 = undefined;
+        const second = stripOneGhTextArg(&buf2, result);
+        if (second.ptr != result.ptr) {
+            // Third pass for --title + --body + --notes
+            @memcpy(buf[0..second.len], second);
+            const third = stripOneGhTextArg(&buf2, buf[0..second.len]);
+            if (third.ptr != buf[0..second.len].ptr) {
+                @memcpy(buf[0..third.len], third);
+                return buf[0..third.len];
+            }
+            return buf[0..second.len];
+        }
+    }
+    return result;
+}
+
+fn stripOneGhTextArg(buf: []u8, command: []const u8) []const u8 {
+    // Find "gh " at a segment start
+    const gh_idx = std.mem.indexOf(u8, command, "gh ") orelse return command;
+    if (!isAtSegmentStart(command, gh_idx)) return command;
+
+    const seg_end = findSegmentEnd(command, gh_idx);
+    const flag = findLongTextFlag(command, gh_idx, seg_end, &cli_text_flags) orelse return command;
+    const msg_end = skipMessageContent(command, flag.val_start);
+
+    // Don't strip values with active shell expansion
+    const msg_content = command[flag.val_start..msg_end];
+    if (messageContainsExpansion(msg_content)) return command;
+
+    return buildStrippedResult(buf, command, flag.flag_start, msg_end) orelse command;
 }
 
 /// Strip heredoc body content from shell commands.

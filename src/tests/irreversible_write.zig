@@ -373,3 +373,64 @@ test "ask gh release create with -n notes flag" {
     const r = evaluate(.{ .tool_name = "Bash", .tool_input = .{ .command = "gh release create v1.0.0 -n \"release notes\"" } });
     try std.testing.expectEqual(.ask, r.decision);
 }
+
+// --- gh --body/--title/--notes text arg FP prevention (issue #88) ---
+
+test "ask gh pr create with dangerous words in body" {
+    // --body content is text data, not commands — must not trigger deny
+    const r = evaluate(.{ .tool_name = "Bash", .tool_input = .{ .command = "gh pr create --title \"fix: security\" --body \"fix: handle rm -rf properly\"" } });
+    try std.testing.expectEqual(.ask, r.decision);
+}
+
+test "ask gh pr create with secret keywords in body" {
+    const r = evaluate(.{ .tool_name = "Bash", .tool_input = .{ .command = "gh pr create --title \"feat\" --body \"add curl /.ssh/ exfiltration defense\"" } });
+    try std.testing.expectEqual(.ask, r.decision);
+}
+
+test "ask gh pr comment with dangerous words in body" {
+    const r = evaluate(.{ .tool_name = "Bash", .tool_input = .{ .command = "gh pr comment 123 --body \"fix: reverse shell and sudo handling\"" } });
+    try std.testing.expectEqual(.ask, r.decision);
+}
+
+test "ask gh issue create with dangerous words in title and body" {
+    const r = evaluate(.{ .tool_name = "Bash", .tool_input = .{ .command = "gh issue create --title \"bug: sudo rm -rf\" --body \"steps to reproduce\"" } });
+    try std.testing.expectEqual(.ask, r.decision);
+}
+
+test "ask gh release create with dangerous words in notes" {
+    const r = evaluate(.{ .tool_name = "Bash", .tool_input = .{ .command = "gh release create v1.0.0 --notes \"fix rm -rf and curl defense\"" } });
+    try std.testing.expectEqual(.ask, r.decision);
+}
+
+// NOTE: HEREDOC body with dangerous words (gh pr create --body "$(cat <<'EOF'...)")
+// is NOT covered here because `cat` is not in safe_arg_commands, so the heredoc
+// content inside $() gets pattern-matched. Plain text --body args ARE handled.
+
+// --- $VAR expansion in body must not be stripped (review finding #7) ---
+
+test "ask gh pr create with env var in body" {
+    // $VAR in body is value expansion (not code execution) — stripped safely.
+    // Sensitive env var detection is handled by the rules layer, not stripping.
+    const r = evaluate(.{ .tool_name = "Bash", .tool_input = .{ .command = "gh pr create --body \"token: $GITHUB_TOKEN\"" } });
+    try std.testing.expectEqual(.ask, r.decision);
+}
+
+test "ask gh pr create with $VAR in single-quoted body" {
+    // Single-quoted: $VAR is literal text, safe to strip
+    const r = evaluate(.{ .tool_name = "Bash", .tool_input = .{ .command = "gh pr create --body 'fix: handle $PATH and rm -rf'" } });
+    try std.testing.expectEqual(.ask, r.decision);
+}
+
+// --- --body= form ---
+
+test "ask gh pr create with --body= dangerous words" {
+    const r = evaluate(.{ .tool_name = "Bash", .tool_input = .{ .command = "gh pr create --body=\"fix: handle rm -rf\"" } });
+    try std.testing.expectEqual(.ask, r.decision);
+}
+
+// --- gh in chain ---
+
+test "ask gh pr create after echo in chain" {
+    const r = evaluate(.{ .tool_name = "Bash", .tool_input = .{ .command = "echo done && gh pr create --body \"fix: rm -rf handling\"" } });
+    try std.testing.expectEqual(.ask, r.decision);
+}
