@@ -17,9 +17,9 @@ test "block edit gitconfig" {
     try std.testing.expectEqual(.deny, r.decision);
 }
 
-test "block write git hooks" {
+test "ask write git hooks" {
     const r = evaluate(.{ .tool_name = "Write", .tool_input = .{ .file_path = "/Users/user/project/.git/hooks/pre-commit" } });
-    try std.testing.expectEqual(.deny, r.decision);
+    try std.testing.expectEqual(.ask, r.decision);
 }
 
 test "block write to /etc" {
@@ -172,9 +172,19 @@ test "block cp to gitconfig via bash" {
     try std.testing.expectEqual(.deny, r.decision);
 }
 
-test "block mv to git hooks via bash" {
+test "ask mv to git hooks via bash" {
     const r = evaluate(.{ .tool_name = "Bash", .tool_input = .{ .command = "mv /tmp/evil /Users/user/project/.git/hooks/pre-commit" } });
-    try std.testing.expectEqual(.deny, r.decision);
+    try std.testing.expectEqual(.ask, r.decision);
+}
+
+test "ask edit git hooks" {
+    const r = evaluate(.{ .tool_name = "Edit", .tool_input = .{ .file_path = "/Users/user/project/.git/hooks/post-commit" } });
+    try std.testing.expectEqual(.ask, r.decision);
+}
+
+test "allow read git hooks" {
+    const r = evaluate(.{ .tool_name = "Read", .tool_input = .{ .file_path = "/Users/user/project/.git/hooks/pre-commit" } });
+    try std.testing.expectEqual(.allow, r.decision);
 }
 
 test "allow redirect to normal file" {

@@ -598,7 +598,6 @@ pub const shell_config_patterns = [_][]const u8{
     ".zlogout",
     ".profile",
     ".gitconfig",
-    ".git/hooks/",
     // Claude Code / IDE settings protection
     "/.claude/settings",
     "/.cursor/mcp.json",
@@ -624,6 +623,12 @@ pub const shell_config_patterns = [_][]const u8{
 };
 
 // safe_arg_commands moved to shell_analyzer.zig (detection mechanics, not policy)
+
+// Git hooks protection — ask user for confirmation on Edit/Write (not Read).
+// Hooks are legitimate development artifacts but also an attack vector.
+pub const git_hooks_patterns = [_][]const u8{
+    ".git/hooks/",
+};
 
 // CI/CD pipeline config protection (issue #12)
 // Ask user for confirmation on Edit/Write (not Read) — supply chain attack vector
