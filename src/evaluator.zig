@@ -241,6 +241,11 @@ fn checkBashCommand(raw_command: []const u8) RuleResult {
         return .{ .decision = .ask, .reason = "CI/CD pipeline config modification — confirm with user" };
     }
 
+    // Bash write to git hooks (ask user)
+    if (analyzer.containsPatternSafe(command, &rules.git_hooks_patterns)) {
+        return .{ .decision = .ask, .reason = "git hooks modification — confirm with user" };
+    }
+
     // Redirect target checks (issue #2): catch `echo "evil" > ~/.bashrc` etc.
     // These catch cases where safe_arg_commands (echo/printf) redirect to protected paths.
     if (detector.hasRedirectToPattern(command, &rules.shell_config_patterns)) {
@@ -251,6 +256,9 @@ fn checkBashCommand(raw_command: []const u8) RuleResult {
     }
     if (detector.hasRedirectToPattern(command, &rules.cicd_config_patterns)) {
         return .{ .decision = .ask, .reason = "redirect to CI/CD config — confirm with user" };
+    }
+    if (detector.hasRedirectToPattern(command, &rules.git_hooks_patterns)) {
+        return .{ .decision = .ask, .reason = "redirect to git hooks — confirm with user" };
     }
     if (detector.hasRedirectToSystemPath(command, &rules.system_path_patterns)) {
         return .{ .decision = .deny, .reason = "redirect to system path blocked" };
@@ -315,6 +323,9 @@ fn checkFileAccess(raw_file_path: []const u8, tool_name: []const u8) RuleResult 
         }
         if (analyzer.containsPattern(file_path, &rules.cicd_config_patterns)) {
             return .{ .decision = .ask, .reason = "CI/CD pipeline config modification — confirm with user" };
+        }
+        if (analyzer.containsPattern(file_path, &rules.git_hooks_patterns)) {
+            return .{ .decision = .ask, .reason = "git hooks modification — confirm with user" };
         }
         for (rules.system_path_patterns) |prefix| {
             if (std.mem.startsWith(u8, file_path, prefix)) {
