@@ -4,26 +4,31 @@ const evaluate = evaluator.evaluate;
 
 // --- Pattern expansion (issue #57) ---
 
-// macOS open command: launches URLs/applications
-test "block open URL" {
+// macOS open command: launches URLs/applications — ask (not deny)
+test "ask open URL" {
     const r = evaluate(.{ .tool_name = "Bash", .tool_input = .{ .command = "open https://evil.com/exploit" } });
-    try std.testing.expectEqual(.deny, r.decision);
+    try std.testing.expectEqual(.ask, r.decision);
 }
 
-test "block open application" {
+test "ask open application" {
     const r = evaluate(.{ .tool_name = "Bash", .tool_input = .{ .command = "open /tmp/evil.app" } });
-    try std.testing.expectEqual(.deny, r.decision);
+    try std.testing.expectEqual(.ask, r.decision);
 }
 
-test "block open with -a flag" {
+test "ask open with -a flag" {
     const r = evaluate(.{ .tool_name = "Bash", .tool_input = .{ .command = "open -a Terminal" } });
-    try std.testing.expectEqual(.deny, r.decision);
+    try std.testing.expectEqual(.ask, r.decision);
 }
 
 // Linux xdg-open equivalent
-test "block xdg-open URL" {
+test "ask xdg-open URL" {
     const r = evaluate(.{ .tool_name = "Bash", .tool_input = .{ .command = "xdg-open https://evil.com" } });
-    try std.testing.expectEqual(.deny, r.decision);
+    try std.testing.expectEqual(.ask, r.decision);
+}
+
+test "ask /usr/bin/open URL" {
+    const r = evaluate(.{ .tool_name = "Bash", .tool_input = .{ .command = "/usr/bin/open https://example.com" } });
+    try std.testing.expectEqual(.ask, r.decision);
 }
 
 // Additional sensitive env vars in network commands

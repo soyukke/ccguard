@@ -334,6 +334,16 @@ pub const gh_api_write_flags = [_][]const u8{
     " --method DELETE",
 };
 
+// macOS/Linux URL/application opener — ask user confirmation (not deny)
+// Uses prefix_only matching via matchesPrefixInChain for bare "open" / "xdg-open",
+// plus containsPatternSafe for full-path variants like /usr/bin/open.
+pub const open_commands = [_][]const u8{
+    "open ",
+    "xdg-open ",
+    "/usr/bin/open ",
+    "/usr/bin/xdg-open ",
+};
+
 // Irreversible external write operations — ask user confirmation
 // git push (non-force; force push is already in dangerous_commands as deny)
 pub const git_push_context = [_][]const u8{"git push"};
@@ -548,9 +558,7 @@ pub const prefix_only_commands = [_][]const u8{
     "rclone copy",
     "rclone sync",
     "rclone move",
-    // macOS/Linux URL/application opener (issue #57)
-    "open",
-    "xdg-open",
+    // macOS/Linux URL/application opener: moved to open_commands (ask, not deny)
     // Clipboard access (issue #19) — AI agents should not read/write clipboard
     "pbpaste",
     "pbcopy",
