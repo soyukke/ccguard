@@ -87,7 +87,7 @@ validate:
 version:
     @grep '\.version = ' build.zig.zon | head -1 | sed 's/.*"\(.*\)".*/\1/'
 
-# Bump version: just bump patch|minor|major
+# Bump version in all files: just bump patch|minor|major
 bump part="patch":
     #!/usr/bin/env bash
     set -euo pipefail
@@ -100,9 +100,16 @@ bump part="patch":
         *) echo "usage: just bump patch|minor|major"; exit 1 ;;
     esac
     next="${major}.${minor}.${patch}"
+    # build.zig.zon
     tmp=$(mktemp)
     sed "s/.version = \"${current}\"/.version = \"${next}\"/" build.zig.zon > "$tmp" && mv "$tmp" build.zig.zon
-    echo "${current} -> ${next}"
+    # .claude-plugin/plugin.json
+    tmp=$(mktemp)
+    sed "s/\"version\": \"${current}\"/\"version\": \"${next}\"/" .claude-plugin/plugin.json > "$tmp" && mv "$tmp" .claude-plugin/plugin.json
+    # src/main.zig
+    tmp=$(mktemp)
+    sed "s/ccguard ${current}/ccguard ${next}/" src/main.zig > "$tmp" && mv "$tmp" src/main.zig
+    echo "${current} -> ${next} (build.zig.zon, plugin.json, main.zig)"
 
 # Create git tag for current version
 tag:
@@ -128,7 +135,7 @@ release-tag part="patch": test release update-readme
     git commit -m "release: v${current}" --allow-empty
     git tag "v${current}"
     echo "tagged v${current}"
-    # 2. Bump to next version
+    # 2. Bump to next version (all files)
     IFS='.' read -r major minor patch <<< "$current"
     case "{{part}}" in
         patch) patch=$((patch + 1)) ;;
@@ -139,7 +146,11 @@ release-tag part="patch": test release update-readme
     next="${major}.${minor}.${patch}"
     tmp=$(mktemp)
     sed "s/.version = \"${current}\"/.version = \"${next}\"/" build.zig.zon > "$tmp" && mv "$tmp" build.zig.zon
-    git add build.zig.zon
+    tmp=$(mktemp)
+    sed "s/\"version\": \"${current}\"/\"version\": \"${next}\"/" .claude-plugin/plugin.json > "$tmp" && mv "$tmp" .claude-plugin/plugin.json
+    tmp=$(mktemp)
+    sed "s/ccguard ${current}/ccguard ${next}/" src/main.zig > "$tmp" && mv "$tmp" src/main.zig
+    git add build.zig.zon .claude-plugin/plugin.json src/main.zig
     git commit -m "bump: v${next}"
     echo "v${current} tagged, bumped to v${next}"
 

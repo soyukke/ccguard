@@ -1,6 +1,6 @@
 {
   "name": "ccguard",
-  "version": "0.4.3",
+  "version": "0.4.4",
   "description": "Security guard for Claude Code — blocks dangerous commands with shell-aware pattern matching (864 tests, zero dependencies)",
   "author": {
     "name": "soyukke",
