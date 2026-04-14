@@ -17,9 +17,9 @@ test "allow env in variable name" {
     try std.testing.expectEqual(.allow, r.decision);
 }
 
-test "allow git push normal" {
+test "ask git push normal" {
     const r = evaluate(.{ .tool_name = "Bash", .tool_input = .{ .command = "git push origin main" } });
-    try std.testing.expectEqual(.allow, r.decision);
+    try std.testing.expectEqual(.ask, r.decision);
 }
 
 test "allow editing normal source file" {

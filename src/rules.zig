@@ -334,6 +334,87 @@ pub const gh_api_write_flags = [_][]const u8{
     " --method DELETE",
 };
 
+// Irreversible external write operations — ask user confirmation
+// git push (non-force; force push is already in dangerous_commands as deny)
+pub const git_push_context = [_][]const u8{"git push"};
+
+// gh CLI write subcommands — these mutate remote state and are not easily reversible.
+// Format: "gh <resource> <subcommand>" — only mutation subcommands are listed.
+// Read-only subcommands (list, view, status, checks, diff, checkout, clone) are allowed.
+pub const gh_write_commands = [_][]const u8{
+    // Pull requests
+    "gh pr create",
+    "gh pr merge",
+    "gh pr close",
+    "gh pr comment",
+    "gh pr edit",
+    "gh pr review",
+    "gh pr ready",
+    "gh pr reopen",
+    "gh pr lock",
+    "gh pr unlock",
+    // Issues
+    "gh issue create",
+    "gh issue close",
+    "gh issue comment",
+    "gh issue edit",
+    "gh issue reopen",
+    "gh issue delete",
+    "gh issue lock",
+    "gh issue transfer",
+    "gh issue pin",
+    "gh issue unpin",
+    // Releases
+    "gh release create",
+    "gh release delete",
+    "gh release edit",
+    "gh release upload",
+    // Repositories
+    "gh repo create",
+    "gh repo delete",
+    "gh repo edit",
+    "gh repo fork",
+    "gh repo archive",
+    "gh repo rename",
+    "gh repo unarchive",
+    "gh repo sync",
+    // Labels
+    "gh label create",
+    "gh label delete",
+    "gh label edit",
+    "gh label clone",
+    // Secrets & variables
+    "gh secret set",
+    "gh secret delete",
+    "gh variable set",
+    "gh variable delete",
+    // Workflows
+    "gh workflow run",
+    "gh workflow enable",
+    "gh workflow disable",
+    // Gists
+    "gh gist create",
+    "gh gist delete",
+    "gh gist edit",
+    // SSH keys & GPG keys
+    "gh ssh-key add",
+    "gh ssh-key delete",
+    "gh gpg-key add",
+    "gh gpg-key delete",
+    // Projects
+    "gh project create",
+    "gh project delete",
+    "gh project edit",
+    "gh project close",
+    // Cache
+    "gh cache delete",
+};
+
+// Note: no safe-flag exemptions for irreversible write commands.
+// Minor FPs (git push --help → ask) are acceptable because:
+// 1. ask is a UX guard, not a security boundary — user can simply approve
+// 2. Exemptions introduce bypass vectors (e.g. echo --help && git push)
+
 // git remote command execution via --upload-pack (abbreviated argument matching)
 pub const git_remote_context = [_][]const u8{ "git ls-remote", "git fetch", "git clone", "git pull" };
 pub const git_upload_pack_patterns = [_][]const u8{
