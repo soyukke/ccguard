@@ -1,8 +1,8 @@
 # ccguard
 
-[Claude Code](https://docs.anthropic.com/en/docs/claude-code) が `rm -rf /` を実行する前に止める、Zig 製のセキュリティガード。
+A security guard written in Zig that stops [Claude Code](https://docs.anthropic.com/en/docs/claude-code) before it runs `rm -rf /`.
 
-シェル回避・難読化を正規化してからパターンマッチするため、単純な文字列ブロックリストでは防げない攻撃も検知する。外部依存ゼロ、単一バイナリ。
+Normalizes shell evasion and obfuscation before pattern matching, catching attacks that simple string blocklists miss. Zero external dependencies, single binary.
 
 ![demo](demo/demo.gif)
 
