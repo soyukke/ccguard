@@ -238,61 +238,204 @@ fn isAtSegmentStart(command: []const u8, idx: usize) bool {
     return prev == '&' or prev == '|' or prev == ';' or prev == '(' or prev == '\n';
 }
 
-pub fn stripCommitMessage(buf: []u8, command: []const u8) []const u8 {
-    // Strip only the -m message content from git commit, preserving chained commands after.
-    // "git commit -m "msg" && rm -rf /" → "git commit  && rm -rf /"
-    // Only match "git commit" at a chain segment start (not inside echo/grep arguments).
-    const commit_idx = std.mem.indexOf(u8, command, "git commit") orelse return command;
-    if (!isAtSegmentStart(command, commit_idx)) return command;
-    const after_commit = command[commit_idx..];
+// Git subcommands that use -m/--message for user-provided text.
+const git_message_subcommands = [_][]const u8{
+    "git commit",
+    "git tag",
+    "git merge",
+    "git notes",
+    "git stash",
+};
 
-    // Find -m flag
-    const m_offset = std.mem.indexOf(u8, after_commit, " -m ") orelse
-        std.mem.indexOf(u8, after_commit, " -m\"") orelse
-        std.mem.indexOf(u8, after_commit, " -m'") orelse
-        return command;
+const FlagMatch = struct {
+    flag_start: usize, // absolute position of space before the flag
+    val_start: usize, // absolute position where message value begins
+};
 
-    const abs_m = commit_idx + m_offset; // position of " -m"
-    const msg_start = abs_m + 3; // skip " -m"
+/// Find -m/--message flag in command text within [search_start, search_end).
+/// Handles: " -m ", " -am ", " -sam " (combined flags ending in m),
+///           " --message ", " --message=", and quote-adjacent variants.
+/// search_end limits the scan to the current chain segment to prevent
+/// cross-segment stripping (e.g., `git tag && bash -m 'payload'`).
+fn findMessageFlag(command: []const u8, search_start: usize, search_end: usize) ?FlagMatch {
+    var i = search_start;
+    while (i < search_end) {
+        if (command[i] != ' ') {
+            i += 1;
+            continue;
+        }
+        // command[i] == ' '
+        if (i + 1 >= search_end or command[i + 1] != '-') {
+            i += 1;
+            continue;
+        }
 
-    // Skip whitespace after -m
-    var pos = msg_start;
+        // " --message" long form
+        if (i + 2 < search_end and command[i + 2] == '-') {
+            if (std.mem.startsWith(u8, command[i..], " --message")) {
+                const after = i + " --message".len;
+                if (after >= search_end) return .{ .flag_start = i, .val_start = after };
+                const c = command[after];
+                if (c == '=') return .{ .flag_start = i, .val_start = after + 1 };
+                if (c == ' ' or c == '"' or c == '\'') return .{ .flag_start = i, .val_start = after };
+            }
+            i += 1;
+            continue;
+        }
+
+        // " -[a-z]*m" short flag (possibly combined like -am, -sam)
+        var j = i + 2; // skip " -"
+        while (j < search_end and std.ascii.isAlphabetic(command[j])) j += 1;
+        if (j > i + 2 and command[j - 1] == 'm') {
+            // Last flag letter is 'm' — message follows
+            if (j >= search_end or command[j] == ' ' or command[j] == '"' or command[j] == '\'') {
+                return .{ .flag_start = i, .val_start = j };
+            }
+        }
+
+        i += 1;
+    }
+    return null;
+}
+
+/// Skip quoted or unquoted message content starting at `pos`.
+/// Returns the position just past the message end.
+fn skipMessageContent(command: []const u8, start: usize) usize {
+    // Skip whitespace
+    var pos = start;
     while (pos < command.len and command[pos] == ' ') pos += 1;
-    if (pos >= command.len) return command[0..abs_m];
+    if (pos >= command.len) return command.len;
 
-    // Find end of message
-    var msg_end: usize = command.len;
     if (command[pos] == '"') {
-        // Double-quoted: find closing "
+        // Double-quoted: find closing " (respecting backslash escapes)
         var j = pos + 1;
         while (j < command.len) {
             if (command[j] == '\\' and j + 1 < command.len) {
                 j += 2;
             } else if (command[j] == '"') {
-                msg_end = j + 1;
-                break;
+                return j + 1;
             } else {
                 j += 1;
             }
         }
+        return command.len;
     } else if (command[pos] == '\'') {
         // Single-quoted: find closing '
         if (std.mem.indexOfPos(u8, command, pos + 1, "'")) |end| {
-            msg_end = end + 1;
+            return end + 1;
         }
+        return command.len;
     } else {
-        // Unquoted: single word (up to space)
-        msg_end = pos + (std.mem.indexOfAny(u8, command[pos..], " \t") orelse command[pos..].len);
+        // Unquoted: single word (up to space/tab)
+        return pos + (std.mem.indexOfAny(u8, command[pos..], " \t") orelse command[pos..].len);
     }
+}
 
-    // Concatenate: before -m + after message
-    const before = command[0..abs_m];
-    const after = command[msg_end..];
+/// Build stripped result: command[0..cut_start] ++ command[cut_end..] into buf.
+fn buildStrippedResult(buf: []u8, command: []const u8, cut_start: usize, cut_end: usize) ?[]const u8 {
+    const before = command[0..cut_start];
+    const after = command[cut_end..];
     const total = before.len + after.len;
-    if (total > buf.len) return command; // safety fallback
+    if (total > buf.len) return null;
     @memcpy(buf[0..before.len], before);
     @memcpy(buf[before.len..total], after);
     return buf[0..total];
+}
+
+pub fn stripCommitMessage(buf: []u8, command: []const u8) []const u8 {
+    // Strip -m/--message content from git commands, preserving chained commands after.
+    // "git commit -am "msg" && rm -rf /" → "git commit -a && rm -rf /"
+    // Only matches git subcommands at chain segment starts (not inside echo/grep arguments).
+    const result = stripOneGitMessage(buf, command);
+    // Handle chained git commands: git commit -m "msg" && git tag -m "msg"
+    if (result.ptr != command.ptr) {
+        var buf2: [65536]u8 = undefined;
+        const second = stripOneGitMessage(&buf2, result);
+        if (second.ptr != result.ptr) {
+            @memcpy(buf[0..second.len], second);
+            return buf[0..second.len];
+        }
+    }
+    return result;
+}
+
+/// Find the end of the current chain segment (next unquoted chain separator).
+/// Stops at &&, ||, ;, |, or newline, respecting single and double quotes.
+fn findSegmentEnd(command: []const u8, start: usize) usize {
+    var i = start;
+    var in_sq = false;
+    var in_dq = false;
+    while (i < command.len) {
+        const c = command[i];
+        if (!in_dq and c == '\'' and !in_sq) {
+            in_sq = true;
+            i += 1;
+            while (i < command.len and command[i] != '\'') i += 1;
+            if (i < command.len) i += 1;
+            in_sq = false;
+            continue;
+        }
+        if (!in_sq and c == '"') {
+            in_dq = !in_dq;
+            i += 1;
+            continue;
+        }
+        if (!in_sq and !in_dq) {
+            if (c == ';' or c == '\n' or c == '|' or c == '`' or c == '(') return i;
+            if (c == '&' and i + 1 < command.len and command[i + 1] == '&') return i;
+            if (c == '$' and i + 1 < command.len and command[i + 1] == '(') return i;
+        }
+        i += 1;
+    }
+    return command.len;
+}
+
+fn stripOneGitMessage(buf: []u8, command: []const u8) []const u8 {
+    // Find the earliest matching git subcommand at a segment start
+    var best_idx: usize = command.len;
+    for (git_message_subcommands) |subcmd| {
+        if (std.mem.indexOf(u8, command, subcmd)) |idx| {
+            if (isAtSegmentStart(command, idx) and idx < best_idx) {
+                best_idx = idx;
+            }
+        }
+    }
+    if (best_idx == command.len) return command;
+
+    // Limit flag search to the current chain segment
+    const seg_end = findSegmentEnd(command, best_idx);
+
+    // Find message flag within this segment only
+    const flag = findMessageFlag(command, best_idx, seg_end) orelse return command;
+    const msg_end = skipMessageContent(command, flag.val_start);
+
+    // Don't strip messages containing active shell expansion ($(), backtick).
+    // These are executable code, not plain text data. Single-quoted messages
+    // are literal text (safe to strip).
+    const msg_content = command[flag.val_start..msg_end];
+    if (messageContainsExpansion(msg_content)) return command;
+
+    return buildStrippedResult(buf, command, flag.flag_start, msg_end) orelse command;
+}
+
+/// Check if a message value (including surrounding quotes) contains
+/// shell expansion syntax ($() or backtick) that is NOT inside single quotes.
+fn messageContainsExpansion(msg: []const u8) bool {
+    if (msg.len == 0) return false;
+    // Skip leading whitespace
+    var start: usize = 0;
+    while (start < msg.len and msg[start] == ' ') start += 1;
+    if (start >= msg.len) return false;
+
+    // Single-quoted messages: all content is literal, no expansion possible
+    if (msg[start] == '\'') return false;
+
+    // Double-quoted or unquoted: check for $() or backtick
+    for (start..msg.len) |i| {
+        if (msg[i] == '`') return true;
+        if (msg[i] == '$' and i + 1 < msg.len and msg[i + 1] == '(') return true;
+    }
+    return false;
 }
 
 /// Strip heredoc body content from shell commands.
@@ -312,15 +455,24 @@ pub fn stripHeredocBodies(buf: []u8, command: []const u8) []const u8 {
         // Track quoting context (skip heredoc detection inside quotes)
         if (!in_double_quote and c == '\'' and !in_single_quote) {
             in_single_quote = true;
-            if (out < buf.len) { buf[out] = c; out += 1; }
+            if (out < buf.len) {
+                buf[out] = c;
+                out += 1;
+            }
             i += 1;
             // Copy until closing '
             while (i < len and command[i] != '\'') {
-                if (out < buf.len) { buf[out] = command[i]; out += 1; }
+                if (out < buf.len) {
+                    buf[out] = command[i];
+                    out += 1;
+                }
                 i += 1;
             }
             if (i < len) {
-                if (out < buf.len) { buf[out] = command[i]; out += 1; }
+                if (out < buf.len) {
+                    buf[out] = command[i];
+                    out += 1;
+                }
                 i += 1;
             }
             in_single_quote = false;
@@ -328,12 +480,18 @@ pub fn stripHeredocBodies(buf: []u8, command: []const u8) []const u8 {
         }
         if (!in_single_quote and c == '"') {
             in_double_quote = !in_double_quote;
-            if (out < buf.len) { buf[out] = c; out += 1; }
+            if (out < buf.len) {
+                buf[out] = c;
+                out += 1;
+            }
             i += 1;
             continue;
         }
         if (in_single_quote or in_double_quote) {
-            if (out < buf.len) { buf[out] = c; out += 1; }
+            if (out < buf.len) {
+                buf[out] = c;
+                out += 1;
+            }
             i += 1;
             continue;
         }
@@ -343,18 +501,29 @@ pub fn stripHeredocBodies(buf: []u8, command: []const u8) []const u8 {
             (i + 2 >= len or command[i + 2] != '<'))
         {
             // Copy << to output
-            if (out + 1 < buf.len) { buf[out] = '<'; out += 1; buf[out] = '<'; out += 1; }
+            if (out + 1 < buf.len) {
+                buf[out] = '<';
+                out += 1;
+                buf[out] = '<';
+                out += 1;
+            }
             i += 2;
 
             // Skip optional -
             if (i < len and command[i] == '-') {
-                if (out < buf.len) { buf[out] = '-'; out += 1; }
+                if (out < buf.len) {
+                    buf[out] = '-';
+                    out += 1;
+                }
                 i += 1;
             }
 
             // Skip whitespace (copy to output)
             while (i < len and (command[i] == ' ' or command[i] == '\t')) {
-                if (out < buf.len) { buf[out] = command[i]; out += 1; }
+                if (out < buf.len) {
+                    buf[out] = command[i];
+                    out += 1;
+                }
                 i += 1;
             }
 
@@ -363,16 +532,25 @@ pub fn stripHeredocBodies(buf: []u8, command: []const u8) []const u8 {
             var delim_end: usize = i;
             if (i < len and (command[i] == '\'' or command[i] == '"')) {
                 const quote = command[i];
-                if (out < buf.len) { buf[out] = command[i]; out += 1; }
+                if (out < buf.len) {
+                    buf[out] = command[i];
+                    out += 1;
+                }
                 i += 1;
                 delim_start = i;
                 while (i < len and command[i] != quote) {
-                    if (out < buf.len) { buf[out] = command[i]; out += 1; }
+                    if (out < buf.len) {
+                        buf[out] = command[i];
+                        out += 1;
+                    }
                     i += 1;
                 }
                 delim_end = i;
                 if (i < len) {
-                    if (out < buf.len) { buf[out] = command[i]; out += 1; }
+                    if (out < buf.len) {
+                        buf[out] = command[i];
+                        out += 1;
+                    }
                     i += 1;
                 }
             } else {
@@ -381,7 +559,10 @@ pub fn stripHeredocBodies(buf: []u8, command: []const u8) []const u8 {
                     command[i] != '\n' and command[i] != ';' and
                     command[i] != '&' and command[i] != '|')
                 {
-                    if (out < buf.len) { buf[out] = command[i]; out += 1; }
+                    if (out < buf.len) {
+                        buf[out] = command[i];
+                        out += 1;
+                    }
                     i += 1;
                 }
                 delim_end = i;
@@ -392,11 +573,17 @@ pub fn stripHeredocBodies(buf: []u8, command: []const u8) []const u8 {
 
             // Copy rest of current line (preserves pipes, redirects, etc.)
             while (i < len and command[i] != '\n') {
-                if (out < buf.len) { buf[out] = command[i]; out += 1; }
+                if (out < buf.len) {
+                    buf[out] = command[i];
+                    out += 1;
+                }
                 i += 1;
             }
             if (i < len) {
-                if (out < buf.len) { buf[out] = '\n'; out += 1; }
+                if (out < buf.len) {
+                    buf[out] = '\n';
+                    out += 1;
+                }
                 i += 1;
             }
 
@@ -413,7 +600,10 @@ pub fn stripHeredocBodies(buf: []u8, command: []const u8) []const u8 {
             continue;
         }
 
-        if (out < buf.len) { buf[out] = c; out += 1; }
+        if (out < buf.len) {
+            buf[out] = c;
+            out += 1;
+        }
         i += 1;
     }
 
