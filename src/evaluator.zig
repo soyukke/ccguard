@@ -276,6 +276,11 @@ fn checkBashCommand(raw_command: []const u8) RuleResult {
         return .{ .decision = .ask, .reason = "gh write operation — confirm with user" };
     }
 
+    // macOS/Linux open command — launches URLs/applications externally
+    if (analyzer.containsPatternSafe(command, &rules.open_commands)) {
+        return .{ .decision = .ask, .reason = "open command — confirm with user" };
+    }
+
     return .{ .decision = .allow, .reason = "" };
 }
 
