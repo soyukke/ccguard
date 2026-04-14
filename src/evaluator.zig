@@ -256,6 +256,18 @@ fn checkBashCommand(raw_command: []const u8) RuleResult {
         return .{ .decision = .deny, .reason = "redirect to system path blocked" };
     }
 
+    // Irreversible external writes — ask user confirmation (placed after ALL deny checks)
+    // No safe-flag exemptions: minor FPs (--help, --dry-run) are acceptable for a UX guard.
+    // git push (non-force; force push already denied above as dangerous_commands)
+    if (analyzer.containsPatternSafe(command, &rules.git_push_context)) {
+        return .{ .decision = .ask, .reason = "git push — confirm with user" };
+    }
+
+    // gh CLI write subcommands (pr create/merge, issue create/close, release create, etc.)
+    if (analyzer.containsPatternSafe(command, &rules.gh_write_commands)) {
+        return .{ .decision = .ask, .reason = "gh write operation — confirm with user" };
+    }
+
     return .{ .decision = .allow, .reason = "" };
 }
 
