@@ -47,4 +47,5 @@ comptime {
     _ = @import("tests/obfuscation_hardening.zig");
     _ = @import("tests/irreversible_write.zig");
     _ = @import("tests/recursive_delete.zig");
+    _ = @import("tests/new_cli_rules.zig");
 }

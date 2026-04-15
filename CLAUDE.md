@@ -11,7 +11,7 @@ ccguard is a Claude Code PreToolUse hook guard written in Zig. It reads tool cal
 ```bash
 zig build                          # Debug build
 zig build -Doptimize=ReleaseFast   # Release build
-zig build test                     # Run all tests (1048 tests in src/tests.zig)
+zig build test                     # Run all tests (1077 tests in src/tests.zig)
 ```
 
 With just (optional):
@@ -46,26 +46,26 @@ gh release create v0.X.Y --title "v0.X.Y" --notes "..."
 | Module | Responsibility |
 |---|---|
 | `src/types.zig` | Data types: `HookInput`, `ToolInput`, `Decision`, `RuleResult` |
-| `src/rules.zig` | Security policy pattern arrays (pure configuration data, no logic) |
+| `src/rules/` | Security policy pattern arrays organized by domain (pure configuration data, no logic). Files: `execution.zig` (shell exploitation), `secrets.zig` (credential protection), `network.zig` (network exfiltration), `external.zig` (external state mutation), `packages.zig` (supply chain), `infra.zig` (infrastructure), `filesystem.zig` (file path protection), `tools.zig` (dangerous tools), `injection.zig` (code/env injection) |
 | `src/normalizer.zig` | Input normalization pipeline: `normalizePath`, `normalizeShellEvasion` (delegates to `normalizeBasic`, `expandBraces`, `collapseSpaces`), `stripCommitMessage`. Quote-aware: `isCodeExecArg`, `isSingleQuoteMetachar`, `isDoubleQuoteMetachar` |
 | `src/path_matcher.zig` | Path-based matching: `basename`, `matchesSecretPattern`, `matchesProcSecret` |
 | `src/shell_analyzer.zig` | Shell segment analysis: `ChainIterator`, `containsPattern(Safe)`, `containsCompoundInSegment`, `stripShellPrefix`, `isSafeArgCommand`, `isEnvDump`, `matchesPrefixInChain`, `countChainSegments`. Exports: `chain_separators`, `safe_arg_commands` |
 | `src/shell_detector.zig` | Shell execution detection: `hasPipeToShell`, `hasPipeToInterpreter`, `hasProcessSubstitutionShell`, `hasProcessSubstitutionInterpreter`, `hasOutputProcessSubstitutionShell`, `isPipLocalInstall`, `containsDnsCommand`, `hasShellScriptExec`, `hasRedirectToPattern`, `hasRedirectToSystemPath`, `hasSedExecFlag`, `hasXargsShell`. Owns internal tables: `pip_local_flags`, `interpreter_names` helpers |
 | `src/evaluator.zig` | Rule evaluation orchestration: `checkBashCommand`, `checkFileAccess`, `evaluate` |
 | `src/main.zig` | Entry point & I/O: `main`, `writeOutput` |
-| `src/tests.zig` | All 678 integration tests (category-based sections) |
+| `src/tests.zig` | All 1077 integration tests (category-based sections) |
 
 Dependency graph (no cycles):
 ```
-types        (standalone)
-rules        (standalone — policy patterns only)
-normalizer   (standalone)
-path_matcher ← rules
+types          (standalone)
+rules/*        (standalone — 9 domain files, pure policy patterns)
+normalizer     (standalone)
+path_matcher   ← rules/secrets
 shell_analyzer (standalone — exports chain_separators, stripShellPrefix)
-shell_detector ← rules, path_matcher, shell_analyzer
-evaluator    ← types, rules, normalizer, path_matcher, shell_analyzer, shell_detector
-main         ← types, evaluator
-tests        ← evaluator
+shell_detector ← rules/execution, rules/network, path_matcher, shell_analyzer
+evaluator      ← types, rules/*, normalizer, path_matcher, shell_analyzer, shell_detector
+main           ← types, evaluator
+tests          ← evaluator
 ```
 
 ### Flow
@@ -105,40 +105,65 @@ tests        ← evaluator
 4. `matchesProcSecret()` — `/proc/*/environ`, `/proc/*/cmdline`
 5. Edit/Write/NotebookEdit only: `shell_config_patterns`, `cicd_config_patterns`, `system_path_patterns`
 
-### Rule Categories (pattern arrays in `rules.zig`)
+### Rule Categories (pattern arrays in `src/rules/`)
 
-| Array | Check Type | Applies To |
-|---|---|---|
-| `dangerous_commands` | segment-aware (`containsPatternSafe`) | Bash |
-| `reverse_shell_patterns` | segment-aware (`containsPatternSafe`) | Bash |
-| `pipe_shell_patterns` | segment-aware (`containsPatternSafe`) | Bash |
-| `shell_obfuscation_patterns` | substring (raw input) | Bash |
-| `network_commands` + `secret_keywords` | segment-aware AND (`containsPatternSafe` for network, `containsPattern` for secrets) | Bash (exfiltration) |
-| `global_install_commands` | substring | Bash |
-| `history_evasion_commands` | substring | Bash |
-| `file_attr_commands` | substring | Bash |
-| `dns_exfil_commands` + `cmd_subst_indicators` | word-boundary + substring AND | Bash (DNS exfiltration) |
-| `container_escape_patterns` | substring | Bash |
-| `docker_context` + `docker_dangerous_patterns` | compound (docker context + flag substring) | Bash |
-| `lib_injection_patterns` | segment-aware (`containsPatternSafe`) | Bash |
-| `cloud_metadata_patterns` | segment-aware (`containsPatternSafe`) | Bash |
-| `ssh_context` + `ssh_tunnel_flags` | compound (ssh context + flag substring) | Bash |
-| `prefix_only_commands` | exact/prefix per segment | Bash (chain-aware) |
-| `safe_arg_commands` | prefix match per segment | Bash (FP prevention) |
-| `proc_secret_files` | path-token aware | Read/Edit/Write + Bash |
-| `secret_exact_names/dir/file/extensions` | basename-aware | Read/Edit/Write |
-| `file_upload_patterns` | segment-aware (`containsPatternSafe`) | Bash (exfiltration) |
-| `shell_config_patterns` | substring | Edit/Write/NotebookEdit only |
-| `cicd_config_patterns` | substring | Edit/Write/NotebookEdit only |
-| `encoding_commands` + `network_commands` | segment-aware AND (`containsPatternSafe` for both) | Bash (encoding exfiltration) |
-| `interpreter_exec_context` + `interpreter_dangerous_payloads` | same-segment compound (`containsCompoundInSegment`) | Bash (interpreter one-liner) |
-| `credential_literal_patterns` + `network_commands` | segment-aware compound | Bash (credential leakage) |
-| `sensitive_env_vars` + `network_commands` | segment-aware AND | Bash (env var exfiltration) |
-| `custom_registry_patterns` | segment-aware (`containsPatternSafe`) | Bash (supply chain) |
-| `command_exec_options` | segment-aware (`containsPatternSafe`) | Bash (option exec) |
-| `man_context` + `man_dangerous_options` | segment-aware compound | Bash |
-| `git_remote_context` + `git_upload_pack_patterns` | segment-aware compound | Bash |
-| `system_path_patterns` | startsWith | Edit/Write/NotebookEdit only |
+| File | Array | Check Type | Decision |
+|---|---|---|---|
+| `execution.zig` | `dangerous_commands` | segment-aware (`containsPatternSafe`) | deny |
+| `execution.zig` | `reverse_shell_patterns` | segment-aware (`containsPatternSafe`) | deny |
+| `execution.zig` | `pipe_shell_patterns` | segment-aware (`containsPatternSafe`) | deny |
+| `execution.zig` | `shell_obfuscation_patterns` | substring (raw input) | deny |
+| `execution.zig` | `history_evasion_commands` | segment-aware (`containsPatternSafe`) | deny |
+| `execution.zig` | `shell_builtins` | prefix per segment (`matchesPrefixInChain`) | deny |
+| `secrets.zig` | `secret_exact_names/dir/file/extensions` | basename-aware | deny |
+| `secrets.zig` | `proc_secret_files` | path-token aware | deny |
+| `network.zig` | `network_commands` + `secrets.secret_keywords` | segment-aware AND | deny (exfiltration) |
+| `network.zig` | `encoding_commands` + `network_commands` | segment-aware AND | deny (encoding exfil) |
+| `network.zig` | `file_upload_patterns` | segment-aware (`containsPatternSafe`) | deny (upload exfil) |
+| `network.zig` | `dns_exfil_commands` + `cmd_subst_indicators` | word-boundary + substring AND | deny (DNS exfil) |
+| `external.zig` | `gh_api_context` + `gh_api_write_flags` | compound | deny |
+| `external.zig` | `git_remote_context` + `git_upload_pack_patterns` | segment-aware compound | deny |
+| `external.zig` | `git_push_context` | segment-aware (`containsPatternSafe`) | ask |
+| `external.zig` | `gh_write_commands` | segment-aware (`containsPatternSafe`) | ask |
+| `external.zig` | `glab_write_commands` | segment-aware (`containsPatternSafe`) | ask |
+| `external.zig` | `open_commands` | segment-aware (`containsPatternSafe`) | ask |
+| `external.zig` | `deploy_commands` | prefix per segment (`matchesPrefixInChain`) | ask |
+| `packages.zig` | `global_install_commands` | substring | deny |
+| `packages.zig` | `custom_registry_patterns` | segment-aware (`containsPatternSafe`) | deny |
+| `packages.zig` | `npx_commands` | prefix per segment | deny |
+| `packages.zig` | `package_publish_commands` | prefix per segment | deny |
+| `infra.zig` | `docker_context` + `docker_dangerous_patterns` | compound | deny |
+| `infra.zig` | `container_escape_patterns` | substring | deny |
+| `infra.zig` | `ssh_context` + `ssh_tunnel_flags` | compound | deny |
+| `infra.zig` | `cloud_metadata_patterns` | segment-aware (`containsPatternSafe`) | deny |
+| `infra.zig` | `kernel_commands` | prefix per segment | deny |
+| `infra.zig` | `cloud_transfer_commands` | prefix per segment | deny |
+| `infra.zig` | `k8s_commands` | prefix per segment | deny |
+| `infra.zig` | `iac_commands` | prefix per segment | deny |
+| `infra.zig` | `tunnel_commands` | prefix per segment | deny |
+| `infra.zig` | `docker_context` + `docker_ask_patterns` | compound | ask |
+| `filesystem.zig` | `shell_config_patterns` | substring | deny (Edit/Write only) |
+| `filesystem.zig` | `cicd_config_patterns` | substring | ask (Edit/Write only) |
+| `filesystem.zig` | `iac_state_patterns` | substring | deny (Edit/Write only) |
+| `filesystem.zig` | `git_hooks_patterns` | substring | ask (Edit/Write only) |
+| `filesystem.zig` | `system_path_patterns` | startsWith | deny (Edit/Write only) |
+| `filesystem.zig` | `file_attr_commands` | substring | deny |
+| `tools.zig` | `recon_commands` | prefix per segment | deny |
+| `tools.zig` | `cracking_commands` | prefix per segment | deny |
+| `tools.zig` | `sniffing_commands` | prefix per segment | deny |
+| `tools.zig` | `exploit_commands` | prefix per segment | deny |
+| `tools.zig` | `debug_commands` | prefix per segment | deny |
+| `tools.zig` | `disk_commands` | prefix per segment | deny |
+| `tools.zig` | `clipboard_commands` | prefix per segment | deny |
+| `tools.zig` | `db_destructive_commands` | prefix per segment | deny |
+| `tools.zig` | `mail_commands` | prefix per segment | deny |
+| `injection.zig` | `lib_injection_patterns` | segment-aware (`containsPatternSafe`) | deny |
+| `injection.zig` | `command_exec_options` | segment-aware (`containsPatternSafe`) | deny |
+| `injection.zig` | `man_context` + `man_dangerous_options` | segment-aware compound | deny |
+| `injection.zig` | `interpreter_exec_context` + `interpreter_dangerous_payloads` | same-segment compound | deny |
+| `secrets.zig` | `credential_literal_patterns` + `network_commands` | segment-aware compound | deny |
+| `secrets.zig` | `sensitive_env_vars` + `network_commands` | segment-aware AND | deny |
+| — | `safe_arg_commands` (in `shell_analyzer.zig`) | prefix match per segment | FP prevention |
 
 ### Key design decisions
 
