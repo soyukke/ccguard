@@ -115,8 +115,11 @@ fn checkBashCommand(raw_command: []const u8) RuleResult {
     }
 
     // Shell script execution: bash /path/to/script.sh (issue #4)
+    // Script content is opaque (not inspectable) — ask user for confirmation instead of hard deny.
+    // Deferred: don't return immediately so subsequent deny checks are not masked.
+    var pending_ask: ?RuleResult = null;
     if (detector.hasShellScriptExec(command)) {
-        return .{ .decision = .deny, .reason = "shell script execution blocked" };
+        pending_ask = .{ .decision = .ask, .reason = "shell script execution requires confirmation" };
     }
 
     if (analyzer.containsPatternSafe(command, &rules.global_install_commands) and !detector.isPipLocalInstall(command)) {
@@ -147,8 +150,8 @@ fn checkBashCommand(raw_command: []const u8) RuleResult {
     if (tok.hasBlockedCommandPrefix(command, &rules.prefix_only_commands)) {
         return .{ .decision = .deny, .reason = "dangerous shell builtin blocked" };
     }
-    if (tok.hasShellScriptExecTokenized(command)) {
-        return .{ .decision = .deny, .reason = "shell script execution blocked" };
+    if (pending_ask == null and tok.hasShellScriptExecTokenized(command)) {
+        pending_ask = .{ .decision = .ask, .reason = "shell script execution requires confirmation" };
     }
 
     // sed 's/X/Y/e' execute modifier (Flatt Security CVE defense)
@@ -239,6 +242,9 @@ fn checkBashCommand(raw_command: []const u8) RuleResult {
     if (analyzer.containsPatternSafe(command, &rules.iac_state_patterns)) {
         return .{ .decision = .deny, .reason = "IaC state file modification blocked" };
     }
+
+    // Deferred shell script execution ask — returned after all deny checks
+    if (pending_ask) |ask_result| return ask_result;
 
     // Bash write to CI/CD pipeline configs (ask user)
     if (analyzer.containsPatternSafe(command, &rules.cicd_config_patterns)) {

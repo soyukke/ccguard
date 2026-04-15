@@ -33,9 +33,9 @@ test "block exec after do" {
     try std.testing.expectEqual(.deny, r.decision);
 }
 
-test "block bash script after do" {
+test "ask bash script after do" {
     const r = evaluate(.{ .tool_name = "Bash", .tool_input = .{ .command = "while true; do bash /tmp/evil.sh; done" } });
-    try std.testing.expectEqual(.deny, r.decision);
+    try std.testing.expectEqual(.ask, r.decision);
 }
 
 test "block eval after do" {
