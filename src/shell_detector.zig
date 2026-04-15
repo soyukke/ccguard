@@ -2,7 +2,8 @@
 // sed execute modifier, xargs shell execution.
 
 const std = @import("std");
-const rules = @import("rules.zig");
+const execution = @import("rules/execution.zig");
+const network = @import("rules/network.zig");
 const path_matcher = @import("path_matcher.zig");
 const analyzer = @import("shell_analyzer.zig");
 
@@ -20,7 +21,7 @@ const pip_local_flags = [_][]const u8{
 
 // Check if a command pipes to any shell binary (including custom paths like /usr/local/bin/bash)
 pub fn hasPipeToShell(command: []const u8) bool {
-    const shell_names = rules.shell_names;
+    const shell_names = execution.shell_names;
     var i: usize = 0;
     while (i < command.len) {
         if (command[i] == '|') {
@@ -74,7 +75,7 @@ pub fn hasPipeToShell(command: []const u8) bool {
 // `cat data.json | python3 script.py` → allow (script file argument present)
 // Unlike hasPipeToShell, interpreters with a file argument are legitimate.
 pub fn hasPipeToInterpreter(command: []const u8) bool {
-    const interp_names = &rules.interpreter_names;
+    const interp_names = &execution.interpreter_names;
     var i: usize = 0;
     while (i < command.len) {
         if (command[i] == '|') {
@@ -239,7 +240,7 @@ fn skipEnvArgs(after_env_token: []const u8) []const u8 {
 
 // Check if command uses process substitution to execute an interpreter: python3 <(...) (issue #50)
 pub fn hasProcessSubstitutionInterpreter(command: []const u8) bool {
-    const interp_names = &rules.interpreter_names;
+    const interp_names = &execution.interpreter_names;
     var i: usize = 0;
     while (std.mem.indexOfPos(u8, command, i, "<(")) |idx| {
         if (idx == 0) {
@@ -289,7 +290,7 @@ fn matchesInterpreterName(token: []const u8, names: []const []const u8) bool {
 // Check if command uses process substitution to execute a shell: bash <(...), sh <(...), . <(...)
 // Note: "source <(...)" is caught by prefix_only_commands via matchesPrefixInChain, not here.
 pub fn hasProcessSubstitutionShell(command: []const u8) bool {
-    const shell_names = rules.shell_names;
+    const shell_names = execution.shell_names;
     var i: usize = 0;
     while (std.mem.indexOfPos(u8, command, i, "<(")) |idx| {
         if (idx == 0) {
@@ -322,7 +323,7 @@ pub fn hasProcessSubstitutionShell(command: []const u8) bool {
 // Unlike <() where the shell is BEFORE the substitution (bash <(...)),
 // for >() the shell is INSIDE the substitution (>(bash ...)).
 pub fn hasOutputProcessSubstitutionShell(command: []const u8) bool {
-    const shell_names = rules.shell_names;
+    const shell_names = execution.shell_names;
     var i: usize = 0;
     while (std.mem.indexOfPos(u8, command, i, ">(")) |idx| {
         const after = command[idx + 2 ..];
@@ -464,7 +465,7 @@ fn scanSedSubstitutionE(args: []const u8) bool {
 // We scan the full command directly (not via chainSegments) because xargs uses {}
 // which would be split by the chain iterator on '{'.
 pub fn hasXargsShell(command: []const u8) bool {
-    const shell_names = rules.shell_names;
+    const shell_names = execution.shell_names;
     var offset: usize = 0;
     while (offset < command.len) {
         if (std.mem.indexOfPos(u8, command, offset, "xargs ")) |idx| {
@@ -517,7 +518,7 @@ fn findSegmentEnd(s: []const u8) usize {
 // Allows: bash -c '...', bash --version, bash (no args)
 // Uses ChainIterator to check each segment independently.
 pub fn hasShellScriptExec(command: []const u8) bool {
-    const shell_names = rules.shell_names;
+    const shell_names = execution.shell_names;
     var iter = analyzer.ChainIterator{
         .remaining = command,
         .separators = &analyzer.chain_separators,
@@ -674,7 +675,7 @@ pub fn hasRedirectToSystemPath(command: []const u8, prefixes: []const []const u8
 
 // Check if a DNS command (nslookup/dig) appears as a standalone word in the command
 pub fn containsDnsCommand(command: []const u8) bool {
-    for (rules.dns_exfil_commands) |dns_cmd| {
+    for (network.dns_exfil_commands) |dns_cmd| {
         var offset: usize = 0;
         while (offset < command.len) {
             if (std.mem.indexOfPos(u8, command, offset, dns_cmd)) |idx| {

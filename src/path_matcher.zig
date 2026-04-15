@@ -1,7 +1,7 @@
 // Path-based matching — file path secret detection and /proc sensitivity checks.
 
 const std = @import("std");
-const rules = @import("rules.zig");
+const secrets = @import("rules/secrets.zig");
 
 pub fn basename(path: []const u8) []const u8 {
     if (std.mem.lastIndexOfScalar(u8, path, '/')) |idx| {
@@ -17,14 +17,14 @@ pub fn matchesSecretPattern(file_path: []const u8) bool {
     if (std.mem.endsWith(u8, name, ".pub")) return false;
 
     // Exact basename match: .env, .env.local, .env.production, etc.
-    for (rules.secret_exact_names) |pattern| {
+    for (secrets.secret_exact_names) |pattern| {
         if (std.mem.eql(u8, name, pattern)) return true;
         // .env.local, .env.production etc. (starts with .env.)
         if (pattern[0] == '.' and std.mem.startsWith(u8, name, pattern) and name.len > pattern.len and name[pattern.len] == '.') {
             // Allow template files: .env.example, .env.template, .env.sample
             const suffix = name[pattern.len..];
             var is_template = false;
-            for (rules.env_template_suffixes) |tmpl| {
+            for (secrets.env_template_suffixes) |tmpl| {
                 if (std.mem.eql(u8, suffix, tmpl)) {
                     is_template = true;
                     break;
@@ -35,14 +35,14 @@ pub fn matchesSecretPattern(file_path: []const u8) bool {
     }
 
     // Directory patterns: /.ssh/, /.aws/, etc.
-    for (rules.secret_dir_patterns) |pattern| {
+    for (secrets.secret_dir_patterns) |pattern| {
         if (std.mem.indexOf(u8, file_path, pattern) != null) return true;
     }
 
     // Basename starts with pattern: id_rsa, id_ed25519, credentials
     // Matches: credentials, credentials.json, id_rsa (exact)
     // Does NOT match: credentials-helper.md, id_rsa.pub, id_ed25519.pub
-    for (rules.secret_file_patterns) |pattern| {
+    for (secrets.secret_file_patterns) |pattern| {
         if (std.mem.startsWith(u8, name, pattern)) {
             // Exact match or followed by '.' (but not .pub — public keys are safe)
             if (name.len == pattern.len) return true;
@@ -51,7 +51,7 @@ pub fn matchesSecretPattern(file_path: []const u8) bool {
     }
 
     // Extension match on basename only: .pem, .key
-    for (rules.secret_extensions) |ext| {
+    for (secrets.secret_extensions) |ext| {
         if (std.mem.endsWith(u8, name, ext)) return true;
     }
 
@@ -66,7 +66,7 @@ pub fn matchesProcSecret(text: []const u8) bool {
         // Extract the single path token (up to space, tab, newline, semicolon, pipe, or end)
         const path_end = std.mem.indexOfAny(u8, after_proc, " \t\n;|&") orelse after_proc.len;
         const path_token = after_proc[0..path_end];
-        for (rules.proc_secret_files) |sensitive| {
+        for (secrets.proc_secret_files) |sensitive| {
             if (std.mem.indexOf(u8, path_token, sensitive)) |_| return true;
         }
         search = search[idx + 6 ..];

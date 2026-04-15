@@ -258,7 +258,7 @@ pub fn hasBlockedCommandPrefix(input: []const u8, patterns: []const []const u8) 
 /// Check if any segment has a shell binary executing a script file.
 /// Tokenizer equivalent of hasShellScriptExec, but handles & correctly.
 pub fn hasShellScriptExecTokenized(input: []const u8) bool {
-    const shell_names = @import("rules.zig").shell_names;
+    const shell_names = @import("rules/execution.zig").shell_names;
     var iter = TokenIterator.init(input);
     var expect_command = true;
     var found_shell = false;

@@ -62,12 +62,12 @@ pub fn main() !void {
     }
 
     // Benchmark tokenizer iterator (hasBlockedCommandPrefix)
-    const rules = @import("rules.zig");
+    const all_prefix_deny = @import("rules/prefix_deny.zig").all_prefix_deny;
     var tok_total: u64 = 0;
     for (test_cases) |tc| {
         var timer = try std.time.Timer.start();
         for (0..iterations) |_| {
-            const result = tokenizer.hasBlockedCommandPrefix(tc, &rules.prefix_only_commands);
+            const result = tokenizer.hasBlockedCommandPrefix(tc, &all_prefix_deny);
             std.mem.doNotOptimizeAway(&result);
         }
         const elapsed = timer.read();

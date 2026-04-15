@@ -2,7 +2,11 @@
 // Measures the cost of each security check stage for allowed commands (worst case).
 
 const std = @import("std");
-const rules = @import("rules.zig");
+const rules = struct {
+    pub const execution = @import("rules/execution.zig");
+    pub const network = @import("rules/network.zig");
+    pub const filesystem = @import("rules/filesystem.zig");
+};
 const normalizer = @import("normalizer.zig");
 const analyzer = @import("shell_analyzer.zig");
 const detector = @import("shell_detector.zig");
@@ -61,26 +65,27 @@ pub fn main() !void {
         try out.print("  stripHeredocBodies:            {d:>6} ns\n", .{t_heredoc / iterations});
 
         // Heavy containsPatternSafe checks
-        const t_dangerous = benchFn(analyzer.containsPatternSafe, .{ command, &rules.dangerous_commands }, iterations);
-        try out.print("  containsPatternSafe(dangerous):{d:>6} ns  (59 patterns)\n", .{t_dangerous / iterations});
+        const t_dangerous = benchFn(analyzer.containsPatternSafe, .{ command, &rules.execution.dangerous_commands }, iterations);
+        try out.print("  containsPatternSafe(dangerous):{d:>6} ns  ({d} patterns)\n", .{ t_dangerous / iterations, rules.execution.dangerous_commands.len });
 
-        const t_reverse = benchFn(analyzer.containsPatternSafe, .{ command, &rules.reverse_shell_patterns }, iterations);
-        try out.print("  containsPatternSafe(revshell): {d:>6} ns  (17 patterns)\n", .{t_reverse / iterations});
+        const t_reverse = benchFn(analyzer.containsPatternSafe, .{ command, &rules.execution.reverse_shell_patterns }, iterations);
+        try out.print("  containsPatternSafe(revshell): {d:>6} ns  ({d} patterns)\n", .{ t_reverse / iterations, rules.execution.reverse_shell_patterns.len });
 
-        const t_pipe = benchFn(analyzer.containsPatternSafe, .{ command, &rules.pipe_shell_patterns }, iterations);
-        try out.print("  containsPatternSafe(pipe):     {d:>6} ns  (40 patterns)\n", .{t_pipe / iterations});
+        const t_pipe = benchFn(analyzer.containsPatternSafe, .{ command, &rules.execution.pipe_shell_patterns }, iterations);
+        try out.print("  containsPatternSafe(pipe):     {d:>6} ns  ({d} patterns)\n", .{ t_pipe / iterations, rules.execution.pipe_shell_patterns.len });
 
-        const t_prefix = benchFn(analyzer.matchesPrefixInChain, .{ command, &rules.prefix_only_commands }, iterations);
-        try out.print("  matchesPrefixInChain(prefix):  {d:>6} ns  (54 patterns)\n", .{t_prefix / iterations});
+        const prefix_deny = @import("rules/prefix_deny.zig");
+        const t_prefix = benchFn(analyzer.matchesPrefixInChain, .{ command, &prefix_deny.all_prefix_deny }, iterations);
+        try out.print("  matchesPrefixInChain(prefix):  {d:>6} ns  ({d} patterns)\n", .{ t_prefix / iterations, prefix_deny.all_prefix_deny.len });
 
-        const t_tokprefix = benchFn(tok.hasBlockedCommandPrefix, .{ command, &rules.prefix_only_commands }, iterations);
-        try out.print("  hasBlockedCommandPrefix(tok):  {d:>6} ns  (54 patterns)\n", .{t_tokprefix / iterations});
+        const t_tokprefix = benchFn(tok.hasBlockedCommandPrefix, .{ command, &prefix_deny.all_prefix_deny }, iterations);
+        try out.print("  hasBlockedCommandPrefix(tok):  {d:>6} ns  ({d} patterns)\n", .{ t_tokprefix / iterations, prefix_deny.all_prefix_deny.len });
 
-        const t_shellcfg = benchFn(analyzer.containsPatternSafe, .{ command, &rules.shell_config_patterns }, iterations);
-        try out.print("  containsPatternSafe(shellcfg): {d:>6} ns  (32 patterns)\n", .{t_shellcfg / iterations});
+        const t_shellcfg = benchFn(analyzer.containsPatternSafe, .{ command, &rules.filesystem.shell_config_patterns }, iterations);
+        try out.print("  containsPatternSafe(shellcfg): {d:>6} ns  ({d} patterns)\n", .{ t_shellcfg / iterations, rules.filesystem.shell_config_patterns.len });
 
-        const t_network = benchFn(analyzer.containsPatternSafe, .{ command, &rules.network_commands }, iterations);
-        try out.print("  containsPatternSafe(network):  {d:>6} ns  (14 patterns)\n", .{t_network / iterations});
+        const t_network = benchFn(analyzer.containsPatternSafe, .{ command, &rules.network.network_commands }, iterations);
+        try out.print("  containsPatternSafe(network):  {d:>6} ns  ({d} patterns)\n", .{ t_network / iterations, rules.network.network_commands.len });
 
         // Detector checks
         const t_pipeshell = benchFn(detector.hasPipeToShell, .{command}, iterations);
@@ -89,8 +94,8 @@ pub fn main() !void {
         const t_shellexec = benchFn(detector.hasShellScriptExec, .{command}, iterations);
         try out.print("  hasShellScriptExec:            {d:>6} ns\n", .{t_shellexec / iterations});
 
-        const t_redirect = benchFn(detector.hasRedirectToPattern, .{ command, &rules.shell_config_patterns }, iterations);
-        try out.print("  hasRedirectToPattern(shellcfg): {d:>5} ns  (32 patterns)\n", .{t_redirect / iterations});
+        const t_redirect = benchFn(detector.hasRedirectToPattern, .{ command, &rules.filesystem.shell_config_patterns }, iterations);
+        try out.print("  hasRedirectToPattern(shellcfg): {d:>5} ns  ({d} patterns)\n", .{ t_redirect / iterations, rules.filesystem.shell_config_patterns.len });
 
         // Full evaluate
         const types = @import("types.zig");
