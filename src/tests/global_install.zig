@@ -87,3 +87,50 @@ test "allow pip install -r with multiple flags" {
     const r = evaluate(.{ .tool_name = "Bash", .tool_input = .{ .command = "pip install -r requirements.txt --no-cache-dir --quiet" } });
     try std.testing.expectEqual(.allow, r.decision);
 }
+
+// --- deno/bun/pipx global install ---
+
+test "block deno install -g" {
+    const r = evaluate(.{ .tool_name = "Bash", .tool_input = .{ .command = "deno install -g jsr:@std/http/file-server" } });
+    try std.testing.expectEqual(.deny, r.decision);
+}
+
+test "block deno install --global" {
+    const r = evaluate(.{ .tool_name = "Bash", .tool_input = .{ .command = "deno install --global npm:cowsay" } });
+    try std.testing.expectEqual(.deny, r.decision);
+}
+
+test "allow deno install local" {
+    const r = evaluate(.{ .tool_name = "Bash", .tool_input = .{ .command = "deno install" } });
+    try std.testing.expectEqual(.allow, r.decision);
+}
+
+test "block bun install -g" {
+    const r = evaluate(.{ .tool_name = "Bash", .tool_input = .{ .command = "bun install -g typescript" } });
+    try std.testing.expectEqual(.deny, r.decision);
+}
+
+test "block bun add -g" {
+    const r = evaluate(.{ .tool_name = "Bash", .tool_input = .{ .command = "bun add -g prettier" } });
+    try std.testing.expectEqual(.deny, r.decision);
+}
+
+test "block bun install --global" {
+    const r = evaluate(.{ .tool_name = "Bash", .tool_input = .{ .command = "bun install --global eslint" } });
+    try std.testing.expectEqual(.deny, r.decision);
+}
+
+test "allow bun install local" {
+    const r = evaluate(.{ .tool_name = "Bash", .tool_input = .{ .command = "bun install" } });
+    try std.testing.expectEqual(.allow, r.decision);
+}
+
+test "allow bun add local" {
+    const r = evaluate(.{ .tool_name = "Bash", .tool_input = .{ .command = "bun add zod" } });
+    try std.testing.expectEqual(.allow, r.decision);
+}
+
+test "block pipx install" {
+    const r = evaluate(.{ .tool_name = "Bash", .tool_input = .{ .command = "pipx install black" } });
+    try std.testing.expectEqual(.deny, r.decision);
+}
