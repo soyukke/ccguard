@@ -2,12 +2,16 @@
 
 // Dangerous command patterns to block
 pub const dangerous_commands = [_][]const u8{
-    "rm -rf",
-    "rm -fr",
-    "rm -r -f",
-    "rm -f -r",
-    "rm --recursive --force",
-    "rm --force --recursive",
+    "rm -r",  // catches rm -r, rm -rf, rm -rv, rm -ri, etc.
+    "rm -R",  // catches rm -R, rm -Rf, etc. (-R is POSIX alias for -r)
+    "rm -fr", // catches rm -fr (not matched by "rm -r")
+    "rm -fR", // catches rm -fR (not matched by "rm -R")
+    "rm -Ir", // catches rm -Ir (GNU -I flag before -r)
+    "rm -IR", // catches rm -IR
+    "rm -f -r",  // catches rm -f -r
+    "rm -f -R",  // catches rm -f -R
+    "rm --recursive", // catches rm --recursive, rm --recursive --force
+    "rm --force --recursive", // catches rm --force --recursive
     " -delete",
     "sudo ",
     "chmod 777",
@@ -776,3 +780,4 @@ pub const sensitive_env_vars = [_][]const u8{
     "${AZURE_CLIENT_SECRET}",
     "${DIGITALOCEAN_TOKEN}",
 };
+
