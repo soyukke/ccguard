@@ -90,23 +90,109 @@ test "allow bash -c echo" {
     try std.testing.expectEqual(.allow, r.decision);
 }
 
-test "allow bash --version" {
-    const r = evaluate(.{ .tool_name = "Bash", .tool_input = .{ .command = "bash --version" } });
-    try std.testing.expectEqual(.allow, r.decision);
-}
-
 test "allow sh -c ls" {
     const r = evaluate(.{ .tool_name = "Bash", .tool_input = .{ .command = "sh -c 'ls -la'" } });
     try std.testing.expectEqual(.allow, r.decision);
 }
 
-test "allow bash -x flag with script" {
-    // -x starts with '-', treated as flag — not detected
+// --- Flags followed by script file: should ask ---
+
+test "ask bash -x with script" {
     const r = evaluate(.{ .tool_name = "Bash", .tool_input = .{ .command = "bash -x script.sh" } });
+    try std.testing.expectEqual(.ask, r.decision);
+}
+
+test "ask bash -e with script" {
+    const r = evaluate(.{ .tool_name = "Bash", .tool_input = .{ .command = "bash -e script.sh" } });
+    try std.testing.expectEqual(.ask, r.decision);
+}
+
+test "ask bash -xe with script" {
+    const r = evaluate(.{ .tool_name = "Bash", .tool_input = .{ .command = "bash -xe /tmp/deploy.sh" } });
+    try std.testing.expectEqual(.ask, r.decision);
+}
+
+test "ask bash multiple flags with script" {
+    const r = evaluate(.{ .tool_name = "Bash", .tool_input = .{ .command = "bash -e -x script.sh" } });
+    try std.testing.expectEqual(.ask, r.decision);
+}
+
+test "ask sh -x with script" {
+    const r = evaluate(.{ .tool_name = "Bash", .tool_input = .{ .command = "sh -x /tmp/install.sh" } });
+    try std.testing.expectEqual(.ask, r.decision);
+}
+
+// -c takes code argument — should remain allow
+test "allow bash -c with code" {
+    const r = evaluate(.{ .tool_name = "Bash", .tool_input = .{ .command = "bash -c 'ls -la'" } });
     try std.testing.expectEqual(.allow, r.decision);
 }
 
-test "allow bash -e flag" {
-    const r = evaluate(.{ .tool_name = "Bash", .tool_input = .{ .command = "bash -e script.sh" } });
+test "allow bash -xc with code" {
+    // -c combined with other flags, still code execution
+    const r = evaluate(.{ .tool_name = "Bash", .tool_input = .{ .command = "bash -xc 'echo hello'" } });
     try std.testing.expectEqual(.allow, r.decision);
+}
+
+// flags only, no file — should remain allow
+test "allow bash --version" {
+    const r = evaluate(.{ .tool_name = "Bash", .tool_input = .{ .command = "bash --version" } });
+    try std.testing.expectEqual(.allow, r.decision);
+}
+
+test "allow bash -n with script" {
+    // -n reads commands but doesn't execute — syntax check only
+    const r = evaluate(.{ .tool_name = "Bash", .tool_input = .{ .command = "bash -n script.sh" } });
+    try std.testing.expectEqual(.allow, r.decision);
+}
+
+// --rcfile/--init-file take an argument, then script file follows
+test "ask bash --rcfile with script" {
+    const r = evaluate(.{ .tool_name = "Bash", .tool_input = .{ .command = "bash --rcfile myrc script.sh" } });
+    try std.testing.expectEqual(.ask, r.decision);
+}
+
+test "ask bash --init-file with script" {
+    const r = evaluate(.{ .tool_name = "Bash", .tool_input = .{ .command = "bash --init-file myrc script.sh" } });
+    try std.testing.expectEqual(.ask, r.decision);
+}
+
+// -o takes an argument (option name), should not FP on the option name alone
+test "allow bash -o errexit without script" {
+    const r = evaluate(.{ .tool_name = "Bash", .tool_input = .{ .command = "bash -o errexit" } });
+    try std.testing.expectEqual(.allow, r.decision);
+}
+
+test "ask bash -o errexit with script" {
+    const r = evaluate(.{ .tool_name = "Bash", .tool_input = .{ .command = "bash -o errexit script.sh" } });
+    try std.testing.expectEqual(.ask, r.decision);
+}
+
+test "allow bash --norc --noprofile" {
+    const r = evaluate(.{ .tool_name = "Bash", .tool_input = .{ .command = "bash --norc --noprofile" } });
+    try std.testing.expectEqual(.allow, r.decision);
+}
+
+// bare -- ends options, next arg is script file
+test "ask bash -- with script" {
+    const r = evaluate(.{ .tool_name = "Bash", .tool_input = .{ .command = "bash -- script.sh" } });
+    try std.testing.expectEqual(.ask, r.decision);
+}
+
+// --posix is a mode flag, script file follows
+test "ask bash --posix with script" {
+    const r = evaluate(.{ .tool_name = "Bash", .tool_input = .{ .command = "bash --posix script.sh" } });
+    try std.testing.expectEqual(.ask, r.decision);
+}
+
+// --debugger is a mode flag (no argument), script file follows
+test "ask bash --debugger with script" {
+    const r = evaluate(.{ .tool_name = "Bash", .tool_input = .{ .command = "bash --debugger script.sh" } });
+    try std.testing.expectEqual(.ask, r.decision);
+}
+
+// --norc/--noprofile with script file
+test "ask bash --norc with script" {
+    const r = evaluate(.{ .tool_name = "Bash", .tool_input = .{ .command = "bash --norc script.sh" } });
+    try std.testing.expectEqual(.ask, r.decision);
 }

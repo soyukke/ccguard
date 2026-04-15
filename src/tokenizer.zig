@@ -262,11 +262,13 @@ pub fn hasShellScriptExecTokenized(input: []const u8) bool {
     var iter = TokenIterator.init(input);
     var expect_command = true;
     var found_shell = false;
+    var skip_next_arg = false;
 
     while (iter.next()) |tok| {
         if (isSeparator(tok.kind)) {
             expect_command = true;
             found_shell = false;
+            skip_next_arg = false;
             continue;
         }
         if (tok.kind == .redirect_out or tok.kind == .redirect_in or tok.kind == .paren_close) continue;
@@ -286,12 +288,59 @@ pub fn hasShellScriptExecTokenized(input: []const u8) bool {
                     break;
                 }
             }
+        } else if (skip_next_arg) {
+            // Consuming argument of -o / --rcfile / --init-file / --debugger
+            skip_next_arg = false;
         } else if (found_shell) {
-            // First argument after shell binary
+            // Argument after shell binary — skip flags, detect file path
             if (text.len > 0 and text[0] == '-') {
-                found_shell = false; // It's a flag like -c → allowed
+                if (std.mem.startsWith(u8, text, "--")) {
+                    // --version/--help: no script execution, stop scanning
+                    const terminal = [_][]const u8{ "--version", "--help" };
+                    var is_terminal = false;
+                    for (terminal) |opt| {
+                        if (std.mem.eql(u8, text, opt)) {
+                            is_terminal = true;
+                            break;
+                        }
+                    }
+                    if (is_terminal) {
+                        found_shell = false;
+                        continue;
+                    }
+                    // Long options that take an argument: skip the next token
+                    const opts_with_arg = [_][]const u8{ "--rcfile", "--init-file" };
+                    var has_arg = false;
+                    for (opts_with_arg) |opt| {
+                        if (std.mem.eql(u8, text, opt)) {
+                            has_arg = true;
+                            break;
+                        }
+                    }
+                    if (has_arg) {
+                        skip_next_arg = true;
+                        continue;
+                    }
+                    // All other long options (--posix, --norc, --debugger, bare --, etc.):
+                    // mode flags — continue scanning for file path
+                    continue;
+                }
+                // -c, -n, -s or combined flag containing them: stop scanning
+                if (text.len >= 2 and (std.mem.indexOfScalar(u8, text[1..], 'c') != null or
+                    std.mem.indexOfScalar(u8, text[1..], 'n') != null or
+                    std.mem.indexOfScalar(u8, text[1..], 's') != null))
+                {
+                    found_shell = false;
+                    continue;
+                }
+                // -o: takes option name as next argument, skip it
+                if (text.len >= 2 and std.mem.indexOfScalar(u8, text[1..], 'o') != null) {
+                    skip_next_arg = true;
+                    continue;
+                }
+                // Other short flags (-x, -e, -v): continue scanning next tokens
             } else {
-                return true; // It's a file path → blocked
+                return true; // Non-flag token = file path → blocked
             }
         }
     }
