@@ -10,6 +10,13 @@ pub const global_install_commands = [_][]const u8{
     "gem install ",
     "brew install ",
     "brew tap ",
+    "deno install -g",
+    "deno install --global",
+    "bun install -g",
+    "bun install --global",
+    "bun add -g",
+    "bun add --global",
+    "pipx install ",
 };
 
 // pip_local_flags moved to shell_detector.zig (detection mechanics, not policy)
