@@ -11,7 +11,7 @@ ccguard is a Claude Code PreToolUse hook guard written in Zig. It reads tool cal
 ```bash
 zig build                          # Debug build
 zig build -Doptimize=ReleaseFast   # Release build
-zig build test                     # Run all tests (864 tests in src/tests.zig)
+zig build test                     # Run all tests (1048 tests in src/tests.zig)
 ```
 
 With just (optional):
@@ -142,6 +142,7 @@ tests        ← evaluator
 
 ### Key design decisions
 
+- **Recursive delete defense**: `rm -r`, `rm -R`, `rm -rf`, `rm -fr`, `rm -Ir`, `rm --recursive` (and flag combinations) are all in `dangerous_commands` (deny). Both `rm -r` and `rm -rf` have equivalent destructive potential for existing files — `-f` only suppresses prompts for missing/unwritable files
 - **Segment-aware matching (`containsPatternSafe`)**: Uses `ChainIterator` to split command by `chain_separators` (`&&`, `||`, `;`, `$(`, `` ` ``, `|`, `\n`, `(`, `{`), identifies the first token of each segment, skips pattern matching for `safe_arg_commands` (grep, echo, git log, etc.) to prevent FPs like `grep 'import socket'` triggering reverse shell detection. `ChainIterator` is also reused by `isEnvDump`, `matchesPrefixInChain`, and `countChainSegments`
 - **Shell evasion normalization (`normalizeShellEvasion`)**: 3-pass pipeline via `normalizeBasic` → `expandBraces` → `collapseSpaces`, all operating in-place on a single buffer. Pass 1: tab→space, `${IFS}`/`$IFS`→space, quote-aware stripping, backslash-newline removal. Pass 2: brace expansion `{a,b,c}`→`a b c`. Pass 3: consecutive space collapse. Applied before pattern matching to defeat obfuscation
 - **Quote-aware normalization** (issue #40): Shell metacharacters (`&|;><\n` etc.) inside quotes are replaced with sentinel byte `\x01` to prevent false chain splits and redirect detection. Single quotes replace all structural operators (everything is literal). Double quotes replace only `&|;><\n` (keep `$`, backtick, `()` for command substitution). Exception: quotes following `-c`/`-e` flags (`isCodeExecArg`) are NOT modified because their content is executable code
@@ -182,7 +183,7 @@ tests        ← evaluator
 - **sed execute modifier detection** (`hasSedExecFlag`): Parses sed substitution syntax to find `/e` flag, handling arbitrary delimiters. Scans full command (not via ChainIterator) because sed's alternate delimiter can be `|`
 - **xargs shell execution** (`hasXargsShell`): Detects `xargs bash`, `xargs sh` etc. with word-boundary checks. Scans full command because xargs uses `{}` which conflicts with ChainIterator's `{` separator
 - **Output process substitution** (`hasOutputProcessSubstitutionShell`): Detects `>(bash ...)`, `>(sh ...)` patterns where shell is INSIDE the substitution
-- Tests in `src/tests.zig` cover both attack patterns and false-positive prevention (864 tests, organized by category)
+- Tests in `src/tests.zig` cover both attack patterns and false-positive prevention (1048 tests, organized by category)
 
 ## Development Workflow
 
