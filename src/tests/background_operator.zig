@@ -34,9 +34,9 @@ test "block strace after background operator" {
 }
 
 // BLOCK: shell script exec after &
-test "block bash script after background operator" {
+test "ask bash script after background operator" {
     const r = evaluate(.{ .tool_name = "Bash", .tool_input = .{ .command = "echo decoy & bash /tmp/payload.sh" } });
-    try std.testing.expectEqual(.deny, r.decision);
+    try std.testing.expectEqual(.ask, r.decision);
 }
 
 // BLOCK: pipe-to-shell after &

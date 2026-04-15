@@ -531,17 +531,87 @@ pub fn hasShellScriptExec(command: []const u8) bool {
             if (std.mem.startsWith(u8, stripped, shell)) {
                 // Must be followed by a space
                 if (stripped.len > shell.len and stripped[shell.len] == ' ') {
-                    const after_shell = std.mem.trimLeft(u8, stripped[shell.len + 1 ..], " \t");
-                    if (after_shell.len == 0) continue;
-                    // If next token starts with '-' it's a flag (bash -c, bash --version) — allow
-                    if (after_shell[0] == '-') continue;
-                    // Otherwise it's a file path — block
-                    return true;
+                    if (isShellScriptArg(stripped[shell.len + 1 ..])) return true;
                 }
             }
         }
     }
     return false;
+}
+
+/// Scan tokens after the shell name. Skip flags, detect script file arguments.
+/// Returns true if a non-flag token (file path) is found after flags.
+fn isShellScriptArg(args: []const u8) bool {
+    var remaining = args;
+    while (true) {
+        remaining = std.mem.trimLeft(u8, remaining, " \t");
+        if (remaining.len == 0) return false;
+        if (remaining[0] != '-') return true; // non-flag token = file path
+
+        // Flag token — extract it
+        const token_end = std.mem.indexOfAny(u8, remaining, " \t") orelse remaining.len;
+        const flag = remaining[0..token_end];
+        remaining = remaining[token_end..];
+
+        if (std.mem.startsWith(u8, flag, "--")) {
+            // --version/--help: no script execution, stop scanning
+            if (isLongOptTerminal(flag)) return false;
+            // Long options that take an argument: skip the argument, continue scanning
+            if (isLongOptWithArg(flag)) {
+                remaining = skipNextToken(remaining);
+                continue;
+            }
+            // All other long options (--posix, --norc, --debugger, bare --, etc.):
+            // mode flags that don't consume arguments — continue scanning
+            continue;
+        }
+
+        // -c or combined flag containing 'c' (e.g. -xc): next token is code, not file
+        if (flagContains(flag, 'c')) return false;
+        // -n: syntax check only, no execution
+        if (flagContains(flag, 'n')) return false;
+        // -s: read from stdin, remaining args are positional params
+        if (flagContains(flag, 's')) return false;
+        // -o/+o: takes option name as next argument, skip it
+        if (flagContains(flag, 'o')) {
+            remaining = skipNextToken(remaining);
+            continue;
+        }
+
+        // Other short flags (-x, -e, -v, etc.): skip and continue
+    }
+}
+
+/// Long options that definitively mean no script execution follows.
+fn isLongOptTerminal(flag: []const u8) bool {
+    const terminal = [_][]const u8{ "--version", "--help" };
+    for (terminal) |opt| {
+        if (std.mem.eql(u8, flag, opt)) return true;
+    }
+    return false;
+}
+
+/// Long options that take an argument (the argument is NOT a script file).
+fn isLongOptWithArg(flag: []const u8) bool {
+    const opts_with_arg = [_][]const u8{ "--rcfile", "--init-file" };
+    for (opts_with_arg) |opt| {
+        if (std.mem.eql(u8, flag, opt)) return true;
+    }
+    return false;
+}
+
+/// Skip whitespace + one token, returning the remainder.
+fn skipNextToken(input: []const u8) []const u8 {
+    const trimmed = std.mem.trimLeft(u8, input, " \t");
+    const end = std.mem.indexOfAny(u8, trimmed, " \t") orelse trimmed.len;
+    return trimmed[end..];
+}
+
+/// Check if a short flag group (e.g. "-xe") contains a specific char.
+fn flagContains(flag: []const u8, ch: u8) bool {
+    // flag starts with '-', check remaining chars
+    if (flag.len < 2) return false;
+    return std.mem.indexOfScalar(u8, flag[1..], ch) != null;
 }
 
 // --- Redirect target extraction ---
