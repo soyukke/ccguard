@@ -102,8 +102,17 @@ fn normalizeBasic(buf: []u8, input: []const u8) usize {
             i += zwl;
             continue;
         }
-        if (input[i] == '\\' and i + 1 < len and input[i + 1] == '\n') {
-            i += 2;
+        if (input[i] == '\\' and i + 1 < len) {
+            if (input[i + 1] == '\n') {
+                // Backslash-newline (line continuation): remove both
+                i += 2;
+            } else {
+                // Backslash escape outside quotes: strip backslash, keep character
+                // In shell, \X → X for any character (issue #89)
+                buf[out] = input[i + 1];
+                out += 1;
+                i += 2;
+            }
         } else if (input[i] == '\t') {
             buf[out] = ' ';
             out += 1;
@@ -138,11 +147,18 @@ fn normalizeBasic(buf: []u8, input: []const u8) usize {
             if (std.mem.indexOfPos(u8, input, i + 1, "\"")) |close| {
                 const is_code = isCodeExecArg(input, i);
                 const content = input[i + 1 .. close];
-                for (content) |c| {
+                var ci: usize = 0;
+                while (ci < content.len) {
+                    // Backslash-newline inside double quotes: line continuation, remove both
+                    if (content[ci] == '\\' and ci + 1 < content.len and content[ci + 1] == '\n') {
+                        ci += 2;
+                        continue;
+                    }
                     if (out < buf.len) {
-                        buf[out] = if (!is_code and isDoubleQuoteMetachar(c)) quote_sentinel else c;
+                        buf[out] = if (!is_code and isDoubleQuoteMetachar(content[ci])) quote_sentinel else content[ci];
                         out += 1;
                     }
+                    ci += 1;
                 }
                 i = close + 1;
             } else {
