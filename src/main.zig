@@ -322,7 +322,7 @@ pub fn main() !void {
         }
         if (std.mem.eql(u8, args[1], "version")) {
             const out: std.fs.File = .stdout();
-            try out.deprecatedWriter().writeAll("ccguard 0.4.7\n");
+            try out.deprecatedWriter().writeAll("ccguard 0.5.0\n");
             return;
         }
         if (std.mem.eql(u8, args[1], "--help") or std.mem.eql(u8, args[1], "-h")) {
